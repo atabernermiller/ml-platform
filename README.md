@@ -185,6 +185,73 @@ Each dashboard includes panels for:
 
 All metrics are emitted under the `MLPlatform` CloudWatch namespace with a `service` dimension.
 
+## AWS Credentials & IAM Permissions
+
+The library uses [boto3's standard credential chain](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html) and **never** accepts explicit access keys. Credentials are resolved automatically in this order:
+
+| Priority | Source | Typical environment |
+|---|---|---|
+| 1 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars | CI/CD pipelines |
+| 2 | `~/.aws/credentials` (shared credentials file) | Local development |
+| 3 | `AWS_PROFILE` / `~/.aws/config` | Local development with named profiles |
+| 4 | ECS container credentials (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`) | **ECS Fargate** (automatic via task role) |
+| 5 | EC2/SageMaker instance metadata (IMDS) | EC2, SageMaker endpoints |
+
+The only AWS-specific value you configure is `ServiceConfig.aws_region` (default `us-east-1`), which is passed to every boto3 client as `region_name`.
+
+### Minimum IAM policy
+
+The permissions below cover all optional features. Omit sections for features you don't use.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3Checkpoints",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::YOUR_CHECKPOINT_BUCKET",
+        "arn:aws:s3:::YOUR_CHECKPOINT_BUCKET/*"
+      ]
+    },
+    {
+      "Sid": "CloudWatchMetrics",
+      "Effect": "Allow",
+      "Action": "cloudwatch:PutMetricData",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "cloudwatch:namespace": "MLPlatform"
+        }
+      }
+    },
+    {
+      "Sid": "DynamoDBContextStore",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:*:*:table/YOUR_CONTEXT_TABLE"
+    }
+  ]
+}
+```
+
+| Statement | Used by | When needed |
+|---|---|---|
+| **S3Checkpoints** | `S3StateManager` | `ServiceConfig.s3_checkpoint_bucket` is set |
+| **CloudWatchMetrics** | `MetricsEmitter.emit_direct()` | Only for direct `PutMetricData` calls; EMF-via-stdout needs no extra IAM beyond CloudWatch Logs (granted automatically to ECS tasks) |
+| **DynamoDBContextStore** | `DynamoDBContextStore` | `ServiceConfig.state_table_name` is set and you use the DynamoDB backend |
+
+> **Note:** When running on ECS Fargate, the `EcsServiceConstruct` CDK construct should attach these permissions to the task execution role. CloudWatch Logs permissions (`logs:CreateLogStream`, `logs:PutLogEvents`) are included by default in ECS task roles and are required for EMF metric ingestion.
+
 ## Development
 
 ```bash

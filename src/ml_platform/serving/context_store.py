@@ -55,10 +55,20 @@ class DynamoDBContextStore(ContextStore):
     """DynamoDB-backed context store with automatic TTL expiry.
 
     Requires a DynamoDB table with:
+
     - Partition key: ``request_id`` (String)
     - TTL attribute: ``ttl`` (Number)
 
     Enable DynamoDB TTL on the ``ttl`` attribute for automatic cleanup.
+
+    AWS credentials are resolved via boto3's default credential chain
+    (env vars, ``~/.aws/credentials``, ECS task role, EC2 instance
+    profile).  No explicit keys are accepted.
+
+    Required IAM permissions::
+
+        dynamodb:PutItem    – on the context table
+        dynamodb:DeleteItem – on the context table
 
     Args:
         table_name: DynamoDB table name.

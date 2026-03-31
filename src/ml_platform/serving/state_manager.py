@@ -29,6 +29,16 @@ class S3StateManager:
                 state.joblib
                 pacer.json
 
+    AWS credentials are resolved via boto3's default credential chain
+    (env vars, ``~/.aws/credentials``, ECS task role, EC2 instance
+    profile).  No explicit keys are accepted.
+
+    Required IAM permissions::
+
+        s3:PutObject    – on arn:aws:s3:::{bucket}/*
+        s3:GetObject    – on arn:aws:s3:::{bucket}/*
+        s3:ListBucket   – on arn:aws:s3:::{bucket}
+
     Args:
         bucket: S3 bucket name.
         prefix: Key prefix (should end with ``/``).

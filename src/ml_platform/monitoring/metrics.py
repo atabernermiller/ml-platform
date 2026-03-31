@@ -30,8 +30,16 @@ class MetricsEmitter:
 
     1. **EMF (default)**: Writes structured JSON to stdout / CloudWatch Logs.
        CloudWatch extracts metrics automatically. Zero API calls, low cost.
+       Requires only standard CloudWatch Logs permissions (granted by default
+       to ECS task roles).
     2. **Direct PutMetricData**: For immediate availability. Higher cost at
-       scale; use sparingly.
+       scale; use sparingly.  Requires ``cloudwatch:PutMetricData`` IAM
+       permission (scoped to the ``MLPlatform`` namespace).
+
+    AWS credentials are resolved via boto3's default credential chain
+    (env vars, ``~/.aws/credentials``, ECS task role, EC2 instance
+    profile).  No explicit keys are accepted.  The boto3 client is
+    created lazily on first ``emit_direct()`` call.
 
     Args:
         service_name: Service identifier added as a CloudWatch dimension.

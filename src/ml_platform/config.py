@@ -16,6 +16,12 @@ from typing import Literal
 class ServiceConfig:
     """Shared configuration consumed by all ml-platform components.
 
+    AWS credentials are **not** part of this configuration.  All boto3
+    clients created by the library use the `default credential chain
+    <https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html>`_
+    (environment variables, ``~/.aws/credentials``, ECS task role, EC2
+    instance profile).  Only ``aws_region`` is specified here.
+
     Attributes:
         service_name: Unique name for this service (used in metrics, logs, S3 paths,
             and AWS resource naming).
