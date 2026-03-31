@@ -12,7 +12,7 @@ Both paths share:
 - S3 state checkpointing (``S3StateManager``)
 - DynamoDB / Redis context storage (``ContextStore``)
 - CloudWatch + OpenTelemetry metric emission (``MetricsEmitter``)
-- MLflow experiment tracking (``ExperimentTracker``)
+- Pluggable experiment tracking (``ExperimentTracker`` ABC with ``MLflowTracker``)
 - AWS CDK infrastructure constructs (``ml_platform.infra``)
 """
 

@@ -1,4 +1,4 @@
-"""MLflow experiment tracker for ML platform services.
+"""MLflow-backed experiment tracker.
 
 Wraps the MLflow client with conventions shared across all services:
 
@@ -10,9 +10,9 @@ Wraps the MLflow client with conventions shared across all services:
 
 Example::
 
-    from ml_platform.tracking.experiment import ExperimentTracker
+    from ml_platform.tracking.mlflow import MLflowTracker
 
-    tracker = ExperimentTracker(
+    tracker = MLflowTracker(
         tracking_uri="http://mlflow.internal:5000",
         experiment_name="pareto-bandit",
     )
@@ -28,11 +28,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from ml_platform.tracking.base import ExperimentTracker
+
 logger = logging.getLogger(__name__)
 
 
-class ExperimentTracker:
-    """Thin wrapper around MLflow providing ml-platform conventions.
+class MLflowTracker(ExperimentTracker):
+    """MLflow-backed implementation of :class:`ExperimentTracker`.
 
     A single ``Run`` is started on construction and should be ended via
     ``end_run()`` during service shutdown.  All ``log_*`` calls append to

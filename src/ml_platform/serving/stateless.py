@@ -32,9 +32,12 @@ Example::
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform.config import ServiceConfig
+
+if TYPE_CHECKING:
+    from ml_platform.tracking.base import ExperimentTracker
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +60,11 @@ class PlatformMonitor:
             service_name=config.service_name,
             region=config.aws_region,
         )
-        self._tracker = None
+        self._tracker: ExperimentTracker | None = None
         if config.mlflow_tracking_uri:
-            from ml_platform.tracking.experiment import ExperimentTracker
+            from ml_platform.tracking.mlflow import MLflowTracker
 
-            self._tracker = ExperimentTracker(
+            self._tracker = MLflowTracker(
                 tracking_uri=config.mlflow_tracking_uri,
                 experiment_name=config.mlflow_experiment_name,
             )
