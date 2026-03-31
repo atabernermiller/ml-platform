@@ -1,0 +1,84 @@
+site_name: ml-platform
+site_description: API reference and documentation for the ml-platform library.
+repo_url: https://github.com/atabernermiller/ml-platform
+repo_name: atabernermiller/ml-platform
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Bootstrap & Check: getting-started/cli.md
+  - API Reference:
+      - Configuration: api/config.md
+      - Serving:
+          - StatefulServiceBase: api/serving/stateful.md
+          - StatefulRuntime: api/serving/runtime.md
+          - Stateless (BentoML): api/serving/stateless.md
+          - State Manager: api/serving/state_manager.md
+          - Context Store: api/serving/context_store.md
+          - Schemas: api/serving/schemas.md
+      - Monitoring:
+          - MetricsEmitter: api/monitoring/metrics.md
+          - Dashboards: api/monitoring/dashboards.md
+      - Tracking:
+          - ExperimentTracker (ABC): api/tracking/base.md
+          - MLflowTracker: api/tracking/mlflow.md
+      - Infrastructure:
+          - CDK Constructs: api/infra/constructs.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 2
+            members_order: source
+            show_signature_annotations: true
+            separate_signature: true
+            docstring_style: google
+            merge_init_into_class: true
+            show_if_no_docstring: false
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html

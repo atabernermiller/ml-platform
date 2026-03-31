@@ -1,6 +1,6 @@
 # ml-platform
 
-Shared Python library for deploying ML services on AWS with consistent monitoring, experiment tracking, and infrastructure-as-code. The library provides two service development paths — **stateful** (FastAPI) for online-learning and feedback-loop services, and **stateless** (BentoML) for inference-only endpoints — both backed by a common set of CloudWatch metrics, MLflow tracking, S3 state checkpointing, and CDK constructs.
+Shared Python library for deploying ML services on AWS with consistent monitoring, experiment tracking, and infrastructure-as-code. The library provides two service development paths — **stateful** (FastAPI) for online-learning and feedback-loop services, and **stateless** (BentoML) for inference-only endpoints — both backed by CloudWatch metrics, pluggable experiment tracking, S3 state checkpointing, and CDK constructs.
 
 ## Architecture
 
@@ -13,9 +13,9 @@ Shared Python library for deploying ML services on AWS with consistent monitorin
                  ▼                                                  ▼
     ┌────────────────────────┐                        ┌────────────────────────┐
     │  Stateful Path         │                        │  Stateless Path        │
-    │  (FastAPI app factory) │                        │  (BentoML + monitor)   │
-    │                        │                        │                        │
-    │  StatefulServiceBase   │                        │  PlatformMonitor       │
+    │                        │                        │  (BentoML + monitor)   │
+    │  StatefulServiceBase   │                        │                        │
+    │  StatefulRuntime       │                        │  PlatformMonitor       │
     │  create_stateful_app() │                        │  with_platform_        │
     │  /predict  /feedback   │                        │    monitoring()        │
     │  /health   /metrics    │                        │                        │
@@ -29,7 +29,7 @@ Shared Python library for deploying ML services on AWS with consistent monitorin
                │                                       │
                │  S3StateManager    ContextStore        │
                │  MetricsEmitter    ExperimentTracker   │
-               │  (CloudWatch EMF)  (MLflow)            │
+               │  (CloudWatch EMF)  (ABC: MLflow, etc.) │
                └──────────────────┬────────────────────┘
                                   │
                                   ▼
@@ -58,6 +58,26 @@ pip install "ml-platform[stateful]"
 # Everything (stateful, stateless, monitoring, tracking, infra, dev tools)
 pip install "ml-platform[all]"
 ```
+
+### Bootstrap your environment
+
+Before writing any service code, create the required AWS resources and validate your setup:
+
+```bash
+# Create S3 bucket, DynamoDB table, and print the IAM policy to attach
+ml-platform bootstrap \
+  --service-name my-bandit \
+  --s3-bucket my-checkpoints \
+  --region us-east-1
+
+# Verify everything is configured correctly
+ml-platform check \
+  --service-name my-bandit \
+  --s3-bucket my-checkpoints \
+  --region us-east-1
+```
+
+See [CLI: Setup & Validation](#cli-setup--validation) for full details.
 
 ### Minimal Stateful Service
 
@@ -97,6 +117,25 @@ app = create_stateful_app(MyBanditService, config)
 # Run: uvicorn my_service:app --host 0.0.0.0 --port 8000
 ```
 
+### Using StatefulRuntime directly (non-HTTP transports)
+
+`StatefulRuntime` owns all lifecycle orchestration (S3 restore, checkpoint loops, metric emission) without depending on FastAPI. Use it to integrate stateful services into gRPC servers, AWS Lambda handlers, or CLI tools:
+
+```python
+from ml_platform.config import ServiceConfig
+from ml_platform.serving.runtime import StatefulRuntime
+
+runtime = StatefulRuntime(MyBanditService, config)
+
+# In your async entrypoint:
+await runtime.startup()
+result = await runtime.predict({"context": [1, 2, 3]})
+await runtime.process_feedback(result.request_id, {"reward": 1.0})
+await runtime.shutdown()
+```
+
+`create_stateful_app()` is a thin adapter that wires a `StatefulRuntime` into FastAPI routes and lifespan.
+
 ## Stateless BentoML Service
 
 ```python
@@ -120,6 +159,35 @@ class IrisClassifier:
         self._monitor.record_prediction({"n_samples": len(features)})
         return result
 ```
+
+## Experiment Tracking
+
+`ExperimentTracker` is an abstract base class with a 5-method contract (`run_id`, `log_params`, `log_metrics`, `log_artifact`, `end_run`). The library ships with two implementations:
+
+| Class | Backend | Install extra |
+|---|---|---|
+| `MLflowTracker` | MLflow tracking server | `ml-platform[tracking]` |
+| `NullTracker` | Silent no-op (for dev/testing) | *(included in core)* |
+
+```python
+from ml_platform.tracking import MLflowTracker, NullTracker
+
+# Production: log to MLflow
+tracker = MLflowTracker(
+    tracking_uri="http://mlflow.internal:5000",
+    experiment_name="my-experiment",
+)
+
+# Development / testing: no-op
+tracker = NullTracker()
+
+# Both share the same interface
+tracker.log_params({"learning_rate": 0.01})
+tracker.log_metrics({"accuracy": 0.95})
+tracker.end_run()
+```
+
+To integrate a different backend (Weights & Biases, Neptune, Comet, etc.), subclass `ExperimentTracker` and implement the five abstract methods.
 
 ## CDK Infrastructure
 
@@ -149,7 +217,6 @@ class MyServiceStack(Stack):
         MonitoringConstruct(
             self, "Monitoring",
             service_name="pareto-bandit",
-            ecs_service=ecs.service,
         )
 
 app = App()
@@ -185,6 +252,62 @@ Each dashboard includes panels for:
 
 All metrics are emitted under the `MLPlatform` CloudWatch namespace with a `service` dimension.
 
+## CLI: Setup & Validation
+
+The library ships with a CLI that automates environment setup and validates your AWS configuration.
+
+### Preflight check
+
+Verify that credentials, buckets, tables, and permissions are all in order:
+
+```bash
+ml-platform check \
+  --service-name my-bandit \
+  --s3-bucket my-checkpoints \
+  --dynamodb-table my-bandit-context \
+  --region us-east-1
+```
+
+Sample output:
+
+```
+ml-platform preflight check
+  Service: my-bandit
+  Region:  us-east-1
+
+  ✓  Authenticated as arn:aws:iam::123456789:role/dev-role (account 123456789)
+  ✓  Bucket s3://my-checkpoints exists (empty under checkpoints/)
+  ✓  S3 write permission verified (PutObject + DeleteObject)
+  ✓  Table my-bandit-context exists (status=ACTIVE, TTL enabled)
+  ✓  CloudWatch PutMetricData permission verified
+
+  ✓  5/5 checks passed.
+```
+
+### Bootstrap resources
+
+Create the S3 bucket and DynamoDB table automatically, and get the minimum IAM policy to attach:
+
+```bash
+# Preview what will be created (no changes made)
+ml-platform bootstrap \
+  --service-name my-bandit \
+  --s3-bucket my-checkpoints \
+  --region us-east-1 \
+  --dry-run
+
+# Actually create resources
+ml-platform bootstrap \
+  --service-name my-bandit \
+  --s3-bucket my-checkpoints \
+  --region us-east-1
+```
+
+The bootstrap command will:
+1. Create the S3 bucket (with versioning enabled) if it doesn't exist
+2. Create the DynamoDB context table (with TTL) if it doesn't exist
+3. Print the minimum IAM policy JSON tailored to your configuration
+
 ## AWS Credentials & IAM Permissions
 
 The library uses [boto3's standard credential chain](https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html) and **never** accepts explicit access keys. Credentials are resolved automatically in this order:
@@ -201,7 +324,7 @@ The only AWS-specific value you configure is `ServiceConfig.aws_region` (default
 
 ### Minimum IAM policy
 
-The permissions below cover all optional features. Omit sections for features you don't use.
+The permissions below cover all optional features. Omit sections for features you don't use. You can also run `ml-platform bootstrap` to generate a policy tailored to your configuration.
 
 ```json
 {

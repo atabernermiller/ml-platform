@@ -51,6 +51,9 @@ all = [
     "ml-platform[stateful,stateless,monitoring,tracking,infra,dev]",
 ]
 
+[project.scripts]
+ml-platform = "ml_platform.cli.main:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_platform"]
 
