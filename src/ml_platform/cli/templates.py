@@ -159,4 +159,118 @@ def generate_template(
         )
 
     (base / "requirements.txt").write_text("ml-platform\nuvicorn\n")
+
+    _write_manifest(base, name, template)
+    _write_dockerfile(base)
+    _write_docker_compose(base, name)
+
     return base
+
+
+def _write_manifest(base: Path, name: str, template: TemplateName) -> None:
+    """Generate an ``ml-platform.yaml`` tailored to the template."""
+    feature_defaults: dict[TemplateName, dict[str, bool]] = {
+        "agent": {
+            "conversation_store": True,
+            "context_store": False,
+            "checkpointing": False,
+            "mlflow": False,
+        },
+        "chatbot": {
+            "conversation_store": True,
+            "context_store": False,
+            "checkpointing": False,
+            "mlflow": False,
+        },
+        "bandit": {
+            "conversation_store": False,
+            "context_store": True,
+            "checkpointing": True,
+            "mlflow": False,
+        },
+    }
+
+    svc_type: dict[TemplateName, str] = {
+        "agent": "agent",
+        "chatbot": "llm",
+        "bandit": "stateful",
+    }
+
+    features = feature_defaults.get(template, feature_defaults["chatbot"])
+    manifest = (
+        f"service_name: {name}\n"
+        f"type: {svc_type.get(template, 'llm')}\n"
+        f"region: us-east-1\n"
+        f"\n"
+        f"features:\n"
+    )
+    for k, v in features.items():
+        manifest += f"  {k}: {'true' if v else 'false'}\n"
+    manifest += (
+        "\n"
+        "compute:\n"
+        "  size: medium\n"
+        "\n"
+        "scaling:\n"
+        "  min_tasks: 1\n"
+        "  max_tasks: 4\n"
+        "  scale_up_cpu: 70\n"
+        "  scale_down_cpu: 30\n"
+    )
+    (base / "ml-platform.yaml").write_text(manifest)
+
+
+def _write_dockerfile(base: Path) -> None:
+    (base / "Dockerfile").write_text(
+        "FROM python:3.12-slim\n"
+        "\n"
+        "WORKDIR /app\n"
+        "\n"
+        "COPY requirements.txt* pyproject.toml* ./\n"
+        "RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null \\\n"
+        "    || pip install --no-cache-dir -e . 2>/dev/null \\\n"
+        "    || true\n"
+        "\n"
+        "COPY . .\n"
+        "\n"
+        "RUN pip install --no-cache-dir .\n"
+        "\n"
+        "EXPOSE 8000\n"
+        "\n"
+        'CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]\n'
+    )
+
+
+def _write_docker_compose(base: Path, name: str) -> None:
+    compose = (
+        "version: '3.8'\n"
+        "\n"
+        "services:\n"
+        f"  {name}:\n"
+        "    build: .\n"
+        "    ports:\n"
+        '      - "8000:8000"\n'
+        "    environment:\n"
+        "      - ML_PLATFORM_SERVICE_NAME=" + name + "\n"
+        "\n"
+        "  prometheus:\n"
+        "    image: prom/prometheus:latest\n"
+        "    ports:\n"
+        '      - "9090:9090"\n'
+        "    volumes:\n"
+        "      - ./prometheus.yml:/etc/prometheus/prometheus.yml\n"
+        "    profiles: [observability]\n"
+        "\n"
+        "  grafana:\n"
+        "    image: grafana/grafana:latest\n"
+        "    ports:\n"
+        '      - "3000:3000"\n'
+        "    profiles: [observability]\n"
+        "\n"
+        "  jaeger:\n"
+        "    image: jaegertracing/all-in-one:latest\n"
+        "    ports:\n"
+        '      - "16686:16686"\n'
+        "    profiles: [observability]\n"
+    )
+    (base / "docker-compose.dev.yml").write_text(compose)

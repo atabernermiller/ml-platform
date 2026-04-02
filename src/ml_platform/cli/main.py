@@ -5,6 +5,8 @@ Usage::
     ml-platform check     --service-name my-svc --s3-bucket my-ckpt --region us-east-1
     ml-platform bootstrap --service-name my-svc --s3-bucket my-ckpt --region us-east-1
     ml-platform init      --template agent --name my-agent
+    ml-platform deploy aws --service-name my-chatbot
+    ml-platform destroy aws --service-name my-chatbot
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # -- Shared args for check / bootstrap -----------------------------------
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument(
         "--service-name", required=True, help="Service name (used for resource naming)."
@@ -58,6 +61,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print what would be created without making changes.",
     )
 
+    # -- init ----------------------------------------------------------------
     init_p = sub.add_parser(
         "init",
         help="Scaffold a new project from a template.",
@@ -77,6 +81,51 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default="",
         help="Parent directory for the new project (default: cwd).",
+    )
+
+    # -- deploy --------------------------------------------------------------
+    deploy_p = sub.add_parser(
+        "deploy",
+        help="Deploy the service to a target environment.",
+    )
+    deploy_p.add_argument(
+        "target",
+        choices=["aws", "local"],
+        help="Deployment target.",
+    )
+    deploy_p.add_argument(
+        "--service-name", default="", help="Override service name from manifest."
+    )
+    deploy_p.add_argument(
+        "--manifest", default="ml-platform.yaml", help="Path to the project manifest."
+    )
+    deploy_p.add_argument(
+        "--yes", action="store_true", help="Skip approval prompt (CI/CD)."
+    )
+
+    # -- destroy -------------------------------------------------------------
+    destroy_p = sub.add_parser(
+        "destroy",
+        help="Tear down deployed resources.",
+    )
+    destroy_p.add_argument(
+        "target",
+        choices=["aws", "local"],
+        help="Deployment target.",
+    )
+    destroy_p.add_argument(
+        "--service-name", required=True, help="Service to destroy."
+    )
+    destroy_p.add_argument(
+        "--region", default="us-east-1", help="AWS region."
+    )
+    destroy_p.add_argument(
+        "--force", action="store_true", help="Skip name confirmation."
+    )
+    destroy_p.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Only verify that resources are deleted, don't delete anything.",
     )
 
     return parser
@@ -108,6 +157,36 @@ def main() -> None:
         print(f"  pip install -e .")
         print(f"  python app.py")
         sys.exit(0)
+
+    if args.command == "deploy":
+        if args.target == "aws":
+            from ml_platform.cli.deploy import run_deploy
+
+            ok = run_deploy(
+                service_name=args.service_name,
+                auto_approve=args.yes,
+                manifest_path=args.manifest,
+            )
+            sys.exit(0 if ok else 1)
+        elif args.target == "local":
+            print("Local deployment uses Docker Compose.")
+            print("Run:  docker compose -f docker-compose.dev.yml up")
+            sys.exit(0)
+
+    if args.command == "destroy":
+        if args.target == "aws":
+            from ml_platform.cli.destroy import run_destroy
+
+            ok = run_destroy(
+                service_name=args.service_name,
+                region=args.region,
+                force=args.force,
+                verify_only=args.verify_only,
+            )
+            sys.exit(0 if ok else 1)
+        elif args.target == "local":
+            print("Run:  docker compose -f docker-compose.dev.yml down -v")
+            sys.exit(0)
 
     config = _config_from_args(args)
 
