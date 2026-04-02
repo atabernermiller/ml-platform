@@ -2,8 +2,9 @@
 
 Usage::
 
-    ml-platform check  --service-name my-svc --s3-bucket my-ckpt --region us-east-1
+    ml-platform check     --service-name my-svc --s3-bucket my-ckpt --region us-east-1
     ml-platform bootstrap --service-name my-svc --s3-bucket my-ckpt --region us-east-1
+    ml-platform init      --template agent --name my-agent
 """
 
 from __future__ import annotations
@@ -57,6 +58,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print what would be created without making changes.",
     )
 
+    init_p = sub.add_parser(
+        "init",
+        help="Scaffold a new project from a template.",
+    )
+    init_p.add_argument(
+        "--template",
+        choices=["agent", "chatbot", "bandit"],
+        default="agent",
+        help="Project template (default: agent).",
+    )
+    init_p.add_argument(
+        "--name",
+        required=True,
+        help="Project / service name.",
+    )
+    init_p.add_argument(
+        "--output-dir",
+        default="",
+        help="Parent directory for the new project (default: cwd).",
+    )
+
     return parser
 
 
@@ -75,6 +97,18 @@ def main() -> None:
     """Parse arguments and dispatch to the appropriate subcommand."""
     parser = _build_parser()
     args = parser.parse_args()
+
+    if args.command == "init":
+        from ml_platform.cli.templates import generate_template
+
+        output = args.output_dir or None
+        path = generate_template(args.name, args.template, output)
+        print(f"Created {args.template} project at {path}")
+        print(f"  cd {args.name}")
+        print(f"  pip install -e .")
+        print(f"  python app.py")
+        sys.exit(0)
+
     config = _config_from_args(args)
 
     if args.command == "check":

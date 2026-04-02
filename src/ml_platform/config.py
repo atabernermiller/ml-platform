@@ -1,15 +1,86 @@
 """Centralized configuration for ML platform services.
 
 ``ServiceConfig`` is the single source of truth passed to app factories,
-CDK constructs, and monitoring utilities. Values can be set via constructor
+CDK constructs, and monitoring utilities.  Values can be set via constructor
 arguments or overridden from environment variables at runtime.
+
+The configuration uses nested sub-objects to keep service-type-specific
+fields separate:
+
+- ``StatefulConfig`` for online-learning / feedback-loop services.
+- ``LLMConfig`` for single-call LLM services.
+- ``AgentConfig`` for multi-step agentic services.
+
+Only the relevant sub-object needs to be populated; the rest default to
+``None``.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field, fields
+from typing import Any, Literal
+
+
+# ---------------------------------------------------------------------------
+# Service-type-specific configs
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StatefulConfig:
+    """Configuration for :class:`StatefulServiceBase` apps.
+
+    Attributes:
+        checkpoint_interval_s: Seconds between automatic state snapshots.
+        s3_checkpoint_bucket: S3 bucket for state checkpoints.  Empty
+            string disables checkpointing.
+        s3_checkpoint_prefix: Key prefix within the checkpoint bucket.
+    """
+
+    checkpoint_interval_s: int = 300
+    s3_checkpoint_bucket: str = ""
+    s3_checkpoint_prefix: str = "checkpoints/"
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    """Configuration for :class:`LLMServiceBase` apps.
+
+    Attributes:
+        default_model: Default model identifier used when the caller does
+            not specify one.
+        token_budget_daily: Daily token budget across all models.  ``0``
+            disables budget enforcement.
+        cost_alert_threshold_usd: Emit an alert when cumulative daily cost
+            exceeds this value.  ``0.0`` disables alerts.
+    """
+
+    default_model: str = ""
+    token_budget_daily: int = 0
+    cost_alert_threshold_usd: float = 0.0
+
+
+@dataclass(frozen=True)
+class AgentConfig:
+    """Configuration for :class:`AgentServiceBase` apps.
+
+    Attributes:
+        max_steps_per_run: Upper limit on the number of steps (LLM calls
+            plus tool executions) per agent run.  Prevents runaway loops.
+        tool_timeout_s: Maximum wall-clock time for a single tool execution.
+        max_concurrent_tool_calls: Upper limit on tools running in parallel
+            within a single run.
+    """
+
+    max_steps_per_run: int = 20
+    tool_timeout_s: float = 30.0
+    max_concurrent_tool_calls: int = 5
+
+
+# ---------------------------------------------------------------------------
+# Main config
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -23,29 +94,44 @@ class ServiceConfig:
     instance profile).  Only ``aws_region`` is specified here.
 
     Attributes:
-        service_name: Unique name for this service (used in metrics, logs, S3 paths,
-            and AWS resource naming).
+        service_name: Unique name for this service (used in metrics, logs,
+            S3 paths, and AWS resource naming).
         aws_region: AWS region for SDK calls and resource provisioning.
-        s3_checkpoint_bucket: S3 bucket for state checkpoints. Empty disables
-            checkpointing.
-        s3_checkpoint_prefix: Key prefix within the checkpoint bucket.
-        checkpoint_interval_s: Seconds between automatic state snapshots.
         metrics_interval_s: Seconds between automatic metric emission cycles.
-        mlflow_tracking_uri: MLflow tracking server URI. Empty disables MLflow.
-        mlflow_experiment_name: MLflow experiment name; defaults to ``service_name``.
+        mlflow_tracking_uri: MLflow tracking server URI.  Empty disables.
+        mlflow_experiment_name: MLflow experiment name; defaults to
+            ``service_name``.
+        profile: Cloud profile that bundles backend implementations.
+            ``None`` means auto-detect (local if no AWS credentials,
+            AWS otherwise).
+        stateful: Configuration for stateful (online-learning) services.
+        llm: Configuration for single-call LLM services.
+        agent: Configuration for multi-step agentic services.
+
+        s3_checkpoint_bucket: **Deprecated** -- use ``stateful.s3_checkpoint_bucket``.
+        s3_checkpoint_prefix: **Deprecated** -- use ``stateful.s3_checkpoint_prefix``.
+        checkpoint_interval_s: **Deprecated** -- use ``stateful.checkpoint_interval_s``.
         state_backend: Context-store backend technology.
         state_table_name: DynamoDB table or Redis key prefix for context storage.
-        state_ttl_s: TTL for stored prediction contexts (seconds). 0 disables expiry.
+        state_ttl_s: TTL for stored prediction contexts (seconds).
     """
 
     service_name: str
     aws_region: str = "us-east-1"
-    s3_checkpoint_bucket: str = ""
-    s3_checkpoint_prefix: str = "checkpoints/"
-    checkpoint_interval_s: int = 300
     metrics_interval_s: int = 60
     mlflow_tracking_uri: str = ""
     mlflow_experiment_name: str = ""
+
+    profile: Any = None
+
+    stateful: StatefulConfig | None = None
+    llm: LLMConfig | None = None
+    agent: AgentConfig | None = None
+
+    # Legacy fields -- kept for backward compatibility.
+    s3_checkpoint_bucket: str = ""
+    s3_checkpoint_prefix: str = "checkpoints/"
+    checkpoint_interval_s: int = 300
     state_backend: Literal["dynamodb", "redis"] = "dynamodb"
     state_table_name: str = ""
     state_ttl_s: int = 86_400
@@ -54,14 +140,36 @@ class ServiceConfig:
         if not self.mlflow_experiment_name:
             object.__setattr__(self, "mlflow_experiment_name", self.service_name)
         if not self.state_table_name:
-            object.__setattr__(self, "state_table_name", f"{self.service_name}-context")
+            object.__setattr__(
+                self, "state_table_name", f"{self.service_name}-context"
+            )
+
+        # Migrate legacy top-level checkpoint fields into StatefulConfig
+        # when the caller used the old-style flat API.
+        if self.stateful is None and self.s3_checkpoint_bucket:
+            object.__setattr__(
+                self,
+                "stateful",
+                StatefulConfig(
+                    checkpoint_interval_s=self.checkpoint_interval_s,
+                    s3_checkpoint_bucket=self.s3_checkpoint_bucket,
+                    s3_checkpoint_prefix=self.s3_checkpoint_prefix,
+                ),
+            )
 
     @classmethod
     def from_env(cls, **overrides: object) -> ServiceConfig:
         """Construct from environment variables with optional overrides.
 
-        Environment variables are uppercased versions of field names, prefixed
-        with ``ML_PLATFORM_`` (e.g., ``ML_PLATFORM_SERVICE_NAME``).
+        Environment variables are uppercased versions of field names,
+        prefixed with ``ML_PLATFORM_`` (e.g., ``ML_PLATFORM_SERVICE_NAME``).
+
+        Nested config objects are populated from environment variables
+        with an extra segment:
+
+        - ``ML_PLATFORM_AGENT_MAX_STEPS_PER_RUN``
+        - ``ML_PLATFORM_LLM_DEFAULT_MODEL``
+        - ``ML_PLATFORM_STATEFUL_CHECKPOINT_INTERVAL_S``
 
         Args:
             **overrides: Explicit values that take precedence over env vars.
@@ -70,16 +178,49 @@ class ServiceConfig:
             Populated configuration instance.
         """
         env_map: dict[str, object] = {}
-        for field_name in cls.__dataclass_fields__:
-            env_key = f"ML_PLATFORM_{field_name.upper()}"
+        for f in fields(cls):
+            if f.name in ("profile", "stateful", "llm", "agent"):
+                continue
+            env_key = f"ML_PLATFORM_{f.name.upper()}"
             env_val = os.environ.get(env_key)
             if env_val is not None:
-                field_type = cls.__dataclass_fields__[field_name].type
-                if field_type == "int":
-                    env_map[field_name] = int(env_val)
-                elif field_type == "bool":
-                    env_map[field_name] = env_val.lower() in ("1", "true", "yes")
-                else:
-                    env_map[field_name] = env_val
+                env_map[f.name] = _coerce(f.type, env_val)
+
+        agent_env = _read_nested_env("ML_PLATFORM_AGENT_", AgentConfig)
+        if agent_env:
+            env_map["agent"] = AgentConfig(**agent_env)
+
+        llm_env = _read_nested_env("ML_PLATFORM_LLM_", LLMConfig)
+        if llm_env:
+            env_map["llm"] = LLMConfig(**llm_env)
+
+        stateful_env = _read_nested_env("ML_PLATFORM_STATEFUL_", StatefulConfig)
+        if stateful_env:
+            env_map["stateful"] = StatefulConfig(**stateful_env)
+
         env_map.update({k: v for k, v in overrides.items() if v is not None})
         return cls(**env_map)  # type: ignore[arg-type]
+
+
+def _coerce(type_hint: str, raw: str) -> object:
+    """Best-effort coercion from env-var string to the declared type."""
+    if type_hint == "int":
+        return int(raw)
+    if type_hint == "float":
+        return float(raw)
+    if type_hint == "bool":
+        return raw.lower() in ("1", "true", "yes")
+    return raw
+
+
+def _read_nested_env(
+    prefix: str, dataclass_cls: type[Any]
+) -> dict[str, object]:
+    """Read environment variables matching *prefix* + field name."""
+    result: dict[str, object] = {}
+    for f in fields(dataclass_cls):
+        env_key = f"{prefix}{f.name.upper()}"
+        env_val = os.environ.get(env_key)
+        if env_val is not None:
+            result[f.name] = _coerce(f.type, env_val)
+    return result

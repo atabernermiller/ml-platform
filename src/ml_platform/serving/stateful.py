@@ -45,7 +45,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Type
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import HTTPException, status
 
 from ml_platform.config import ServiceConfig
 from ml_platform.serving.schemas import FeedbackRequest, PredictRequest, PredictResponse
@@ -157,7 +157,7 @@ def create_stateful_app(
     config: ServiceConfig,
     *,
     service_kwargs: dict[str, Any] | None = None,
-) -> FastAPI:
+) -> "FastAPI":
     """Build a production-ready FastAPI app wrapping a stateful ML service.
 
     Lifecycle orchestration (S3 restore, checkpoint loops, metric emission)
@@ -172,19 +172,27 @@ def create_stateful_app(
     Returns:
         FastAPI application suitable for ``uvicorn.run(app)``.
     """
+    from ml_platform.serving._app_builder import build_base_app
     from ml_platform.serving.runtime import StatefulRuntime
 
     runtime = StatefulRuntime(
         service_cls, config, service_kwargs=service_kwargs
     )
 
+    app = build_base_app(
+        config,
+        readiness_check=lambda: runtime.is_ready,
+        metrics_source=lambda: runtime.metrics_snapshot(),
+        dashboard_type="stateful",
+    )
+
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    async def lifespan(_app: Any) -> AsyncGenerator[None, None]:
         await runtime.startup()
         yield
         await runtime.shutdown()
 
-    app = FastAPI(title=config.service_name, lifespan=lifespan)
+    app.router.lifespan_context = lifespan
 
     @app.post("/predict", response_model=PredictResponse)
     async def predict(request: PredictRequest) -> PredictResponse:
@@ -203,15 +211,5 @@ def create_stateful_app(
             raise HTTPException(status_code=503, detail="Service not initialized")
         await runtime.process_feedback(request.request_id, request.feedback)
         return {"status": "accepted"}
-
-    @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "healthy", "service": config.service_name}
-
-    @app.get("/metrics")
-    async def metrics() -> dict[str, float]:
-        if not runtime.is_ready:
-            raise HTTPException(status_code=503, detail="Service not initialized")
-        return runtime.metrics_snapshot()
 
     return app
