@@ -12,6 +12,7 @@ The template is returned as a Python dict suitable for
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from ml_platform.cli.manifest import ProjectManifest
@@ -23,6 +24,7 @@ def generate_stack_template(
     ecr_image_uri: str,
     vpc_id: str = "",
     subnet_ids: list[str] | None = None,
+    alert_rules: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Build a complete CloudFormation template from a project manifest.
 
@@ -32,10 +34,13 @@ def generate_stack_template(
         vpc_id: Existing VPC ID.  If empty, the template uses the default VPC.
         subnet_ids: Subnet IDs for the ALB and ECS tasks.  If empty, uses
             default subnets.
+        alert_rules: Optional list of :class:`AlertRule` instances to
+            translate into CloudWatch Alarms.
 
     Returns:
         CloudFormation template as a dict.
     """
+    manifest._alert_rules = alert_rules or []  # type: ignore[attr-defined]
     svc = manifest.service_name
     resources: dict[str, Any] = {}
     outputs: dict[str, Any] = {}
@@ -99,6 +104,10 @@ def generate_stack_template(
 
     # -- CloudWatch dashboard ------------------------------------------------
     resources["Dashboard"] = _cloudwatch_dashboard(manifest)
+
+    # -- CloudWatch alarms from alert rules ---------------------------------
+    alarm_resources = _cloudwatch_alarms(manifest)
+    resources.update(alarm_resources)
 
     # -- Outputs -------------------------------------------------------------
     outputs["ServiceUrl"] = {
@@ -267,7 +276,7 @@ def _task_definition(
                         },
                     },
                     "HealthCheck": {
-                        "Command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+                        "Command": ["CMD-SHELL", "curl -f http://localhost:8000/health/live || exit 1"],
                         "Interval": 10,
                         "Timeout": 5,
                         "Retries": 3,
@@ -331,7 +340,7 @@ def _alb_resources(
                 "Port": 8000,
                 "Protocol": "HTTP",
                 "TargetType": "ip",
-                "HealthCheckPath": "/health",
+                "HealthCheckPath": "/health/ready",
                 "HealthCheckIntervalSeconds": 10,
                 "HealthyThresholdCount": 2,
                 "UnhealthyThresholdCount": 3,
@@ -441,6 +450,52 @@ def _dynamodb_table(table_name: str, ttl_attr: str = "ttl") -> dict[str, Any]:
             },
         },
     }
+
+
+_CONDITION_TO_CW: dict[str, str] = {
+    ">": "GreaterThanThreshold",
+    ">=": "GreaterThanOrEqualToThreshold",
+    "<": "LessThanThreshold",
+    "<=": "LessThanOrEqualToThreshold",
+}
+
+
+def _cloudwatch_alarms(manifest: ProjectManifest) -> dict[str, dict[str, Any]]:
+    """Generate CloudWatch Alarm resources from alert rules on the manifest."""
+    rules: list[Any] = getattr(manifest, "_alert_rules", [])
+    if not rules:
+        return {}
+
+    svc = manifest.service_name
+    ns = "MLPlatform"
+    resources: dict[str, dict[str, Any]] = {}
+
+    for i, rule in enumerate(rules):
+        cw_op = _CONDITION_TO_CW.get(rule.condition)
+        if cw_op is None:
+            continue
+
+        safe_name = re.sub(r"[^A-Za-z0-9]", "", rule.name or f"Alert{i}")
+        logical_id = f"Alarm{safe_name}"
+
+        resources[logical_id] = {
+            "Type": "AWS::CloudWatch::Alarm",
+            "Properties": {
+                "AlarmName": f"{svc}-{rule.name}",
+                "AlarmDescription": rule.description or f"Alert: {rule.metric} {rule.condition} {rule.threshold}",
+                "Namespace": ns,
+                "MetricName": rule.metric,
+                "Dimensions": [{"Name": "service", "Value": svc}],
+                "Statistic": "Average",
+                "Period": max(rule.window_s, 60),
+                "EvaluationPeriods": 1,
+                "Threshold": rule.threshold,
+                "ComparisonOperator": cw_op,
+                "TreatMissingData": "notBreaching",
+            },
+        }
+
+    return resources
 
 
 def _cloudwatch_dashboard(manifest: ProjectManifest) -> dict[str, Any]:

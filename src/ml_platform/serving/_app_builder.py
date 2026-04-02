@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from ml_platform.config import ServiceConfig
 
@@ -86,22 +88,61 @@ _DASHBOARD_TEMPLATE = """\
 """
 
 
+class _RequestContextMiddleware(BaseHTTPMiddleware):
+    """Inject ``request_id`` into the log context for every request.
+
+    Also reads ``X-Request-ID`` and ``X-Session-ID`` headers when
+    present (for distributed tracing), and adds ``method`` and
+    ``path`` for structured log correlation.
+    """
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        from ml_platform.log import bind, clear_context
+
+        clear_context()
+
+        request_id = (
+            request.headers.get("x-request-id")
+            or str(uuid.uuid4())
+        )
+        bind(request_id=request_id)
+
+        session_id = request.headers.get("x-session-id", "")
+        if session_id:
+            bind(session_id=session_id)
+
+        bind(method=request.method, path=request.url.path)
+
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
 def build_base_app(
     config: ServiceConfig,
     *,
     readiness_check: Callable[[], bool],
     metrics_source: Callable[[], dict[str, float]],
+    alert_status: Callable[[], list[dict[str, Any]]] | None = None,
+    health_registry: Any | None = None,
     dashboard_type: Literal["stateful", "llm", "agent"] = "llm",
 ) -> FastAPI:
     """Create a FastAPI app pre-configured with shared platform routes.
 
     The returned app contains:
 
-    - ``GET /health`` -- readiness probe.
+    - ``GET /health`` -- backward-compatible liveness probe (alias).
+    - ``GET /health/live`` -- liveness probe (process alive?).
+    - ``GET /health/ready`` -- readiness probe with per-component status.
     - ``GET /metrics`` -- current metric snapshot.
+    - ``GET /alerts`` -- current alert rule states (if alerts configured).
     - ``GET /dashboard`` -- self-contained HTML dashboard.
     - ``GET /dashboard/api/metrics`` -- JSON endpoint consumed by the
       dashboard.
+    - Request-context middleware that injects ``request_id`` into all
+      log lines for the duration of each request.
 
     Callers add their service-specific routes (e.g. ``/predict``,
     ``/chat``, ``/run``) to the returned app.
@@ -111,15 +152,39 @@ def build_base_app(
         readiness_check: Callable returning ``True`` once the service
             can accept requests.
         metrics_source: Callable returning the current metric snapshot.
+        alert_status: Optional callable returning current alert states.
+        health_registry: Optional :class:`~ml_platform.health.HealthRegistry`
+            for structured health checks.
         dashboard_type: Selects which dashboard panels to render.
 
     Returns:
         Pre-configured FastAPI application.
     """
     app = FastAPI(title=config.service_name)
+    app.add_middleware(_RequestContextMiddleware)
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
+    async def health() -> dict[str, Any]:
+        if health_registry is not None:
+            return health_registry.liveness().to_dict()
+        return {"status": "healthy", "service": config.service_name}
+
+    @app.get("/health/live")
+    async def health_live() -> dict[str, Any]:
+        if health_registry is not None:
+            return health_registry.liveness().to_dict()
+        return {"status": "healthy", "service": config.service_name}
+
+    @app.get("/health/ready")
+    async def health_ready(response: Response) -> dict[str, Any]:
+        if health_registry is not None:
+            result = health_registry.readiness()
+            if result.status == "unhealthy":
+                response.status_code = 503
+            return result.to_dict()
+        if not readiness_check():
+            response.status_code = 503
+            return {"status": "unhealthy", "service": config.service_name}
         return {"status": "healthy", "service": config.service_name}
 
     @app.get("/metrics")
@@ -127,6 +192,12 @@ def build_base_app(
         if not readiness_check():
             raise HTTPException(status_code=503, detail="Service not initialized")
         return metrics_source()
+
+    @app.get("/alerts")
+    async def alerts() -> list[dict[str, Any]]:
+        if alert_status is None:
+            return []
+        return alert_status()
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> str:

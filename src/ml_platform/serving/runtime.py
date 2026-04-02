@@ -49,8 +49,11 @@ class BaseRuntime:
         self._config = config
         self._emitter: MetricsEmitter | None = None
         self._tracker: ExperimentTracker | None = None
+        self._alert_evaluator: Any | None = None
+        self._health_registry: Any | None = None
         self._bg_tasks: list[asyncio.Task[None]] = []
         self._is_ready: bool = False
+        self._task_runner: Any | None = None
 
     @property
     def config(self) -> ServiceConfig:
@@ -68,12 +71,33 @@ class BaseRuntime:
         return self._tracker
 
     @property
+    def alert_evaluator(self) -> Any | None:
+        """The active :class:`AlertEvaluator`, or ``None`` if no rules."""
+        return self._alert_evaluator
+
+    @property
+    def health_registry(self) -> Any | None:
+        """The active :class:`HealthRegistry`, or ``None`` before startup."""
+        return self._health_registry
+
+    @property
     def is_ready(self) -> bool:
         """``True`` once startup has completed and the service is live."""
         return self._is_ready
 
     async def startup(self) -> None:
         """Initialise backends and start background loops."""
+        if self._config.log_format:
+            from ml_platform.log import configure_logging
+
+            configure_logging(
+                format=self._config.log_format,  # type: ignore[arg-type]
+                level=self._config.log_level,
+                service_name=self._config.service_name,
+            )
+
+        self._init_health_registry()
+
         self._emitter = MetricsEmitter(
             service_name=self._config.service_name,
             region=self._config.aws_region,
@@ -89,12 +113,19 @@ class BaseRuntime:
 
         await self._on_startup()
 
+        self._register_health_checks()
+
+        await self._start_scheduled_tasks()
+        self._init_alert_evaluator()
+
         self._bg_tasks.append(asyncio.create_task(self._metrics_loop()))
         self._is_ready = True
         logger.info("Service ready: %s", self._config.service_name)
 
     async def shutdown(self) -> None:
         """Cancel background tasks and clean up."""
+        if self._task_runner is not None:
+            await self._task_runner.stop()
         for task in self._bg_tasks:
             task.cancel()
         self._bg_tasks.clear()
@@ -114,6 +145,80 @@ class BaseRuntime:
         """Override in subclasses to provide service-specific metrics."""
         return {}
 
+    def _get_service_for_scheduling(self) -> Any | None:
+        """Return the service instance for task discovery.
+
+        Subclasses override to expose their service object.
+        """
+        return None
+
+    # -- health checks --------------------------------------------------------
+
+    def _init_health_registry(self) -> None:
+        """Create the HealthRegistry for this runtime."""
+        from ml_platform.health import HealthCheck, HealthRegistry
+
+        self._health_registry = HealthRegistry(
+            service_name=self._config.service_name,
+        )
+        self._health_registry.register(HealthCheck(
+            name="runtime",
+            check=lambda: self._is_ready,
+            critical=True,
+            description="Service runtime initialised and ready",
+        ))
+
+    def _register_health_checks(self) -> None:
+        """Register backend-specific health checks after startup.
+
+        Subclasses override to add checks for their backends
+        (DynamoDB, S3, model state, etc.).
+        """
+
+    # -- scheduled tasks -----------------------------------------------------
+
+    async def _start_scheduled_tasks(self) -> None:
+        """Discover @scheduled methods on the service and start them."""
+        from ml_platform.scheduling import TaskRunner, discover_tasks
+
+        service = self._get_service_for_scheduling()
+        if service is None:
+            return
+
+        tasks = discover_tasks(service)
+        if not tasks:
+            return
+
+        runner = TaskRunner(
+            emitter=self._emitter,
+            service_name=self._config.service_name,
+        )
+        runner.register_all(tasks)
+        await runner.start()
+        self._task_runner = runner
+
+    # -- alerting --------------------------------------------------------------
+
+    def _init_alert_evaluator(self) -> None:
+        """Create the AlertEvaluator if alert rules are configured."""
+        if not self._config.alerts:
+            return
+
+        from ml_platform.alerting import AlertEvaluator, WebhookNotifier
+
+        notifiers = []
+        if self._config.alert_webhook_url:
+            notifiers.append(WebhookNotifier(self._config.alert_webhook_url))
+
+        self._alert_evaluator = AlertEvaluator(
+            rules=self._config.alerts,
+            notifiers=notifiers,
+            service_name=self._config.service_name,
+        )
+        logger.info(
+            "Alert evaluator initialised with %d rule(s)", len(self._config.alerts)
+        )
+
     # -- background loops ----------------------------------------------------
 
     async def _metrics_loop(self) -> None:
@@ -122,10 +227,14 @@ class BaseRuntime:
             if self._is_ready and self._emitter:
                 try:
                     snapshot = self._metrics_snapshot()
+                    if self._task_runner is not None:
+                        snapshot.update(self._task_runner.metrics_snapshot())
                     if snapshot:
                         self._emitter.emit(snapshot)
                     if self._tracker and snapshot:
                         self._tracker.log_metrics(snapshot)
+                    if self._alert_evaluator and snapshot:
+                        self._alert_evaluator.evaluate(snapshot)
                 except Exception:
                     logger.exception("Metric emission failed")
 
@@ -159,6 +268,7 @@ class StatefulRuntime(BaseRuntime):
         self._service_kwargs = service_kwargs or {}
         self._service: Any | None = None
         self._state_mgr: Any | None = None
+        self._context_store: Any | None = None
 
     @property
     def service(self) -> Any:
@@ -170,6 +280,37 @@ class StatefulRuntime(BaseRuntime):
         if self._service is None:
             raise RuntimeError("StatefulRuntime has not been started")
         return self._service
+
+    def _get_service_for_scheduling(self) -> Any | None:
+        return self._service
+
+    def _register_health_checks(self) -> None:
+        from ml_platform.health import HealthCheck
+
+        if self._health_registry is None:
+            return
+
+        self._health_registry.register(HealthCheck(
+            name="service_instance",
+            check=lambda: self._service is not None,
+            critical=True,
+            description="Service class instantiated",
+        ))
+        if self._context_store is not None:
+            store = self._context_store
+            self._health_registry.register(HealthCheck(
+                name="context_store",
+                check=lambda: store is not None,
+                critical=False,
+                description="Context store available",
+            ))
+        if self._state_mgr is not None:
+            self._health_registry.register(HealthCheck(
+                name="s3_state_manager",
+                check=lambda: self._state_mgr is not None,
+                critical=False,
+                description="S3 state manager connected",
+            ))
 
     async def _on_startup(self) -> None:
         service = self._service_cls(**self._service_kwargs)
@@ -199,6 +340,8 @@ class StatefulRuntime(BaseRuntime):
             else:
                 logger.info("No S3 checkpoint found; starting fresh")
 
+        self._context_store = self._create_context_store()
+
         service.on_startup()
 
         if self._state_mgr:
@@ -221,10 +364,23 @@ class StatefulRuntime(BaseRuntime):
     # -- request handling ----------------------------------------------------
 
     async def predict(self, payload: dict[str, Any]) -> Any:
-        """Delegate to the service's ``predict`` and emit per-request metrics."""
+        """Delegate to the service's ``predict``, store context, and emit metrics."""
         from ml_platform.serving.stateful import PredictionResult
 
         result: PredictionResult = await self.service.predict(payload)
+
+        if self._context_store is not None:
+            try:
+                self._context_store.put(result.request_id, {
+                    "payload": payload,
+                    "prediction": result.prediction,
+                    "metadata": result.metadata,
+                })
+            except Exception:
+                logger.exception(
+                    "Failed to store context for request_id=%s", result.request_id
+                )
+
         if self._emitter:
             self._emitter.emit_event(
                 "prediction",
@@ -240,12 +396,54 @@ class StatefulRuntime(BaseRuntime):
     async def process_feedback(
         self, request_id: str, feedback: dict[str, Any]
     ) -> None:
-        """Delegate to the service's ``process_feedback``."""
-        await self.service.process_feedback(request_id, feedback)
+        """Retrieve stored context and delegate to the service."""
+        context: dict[str, Any] | None = None
+        if self._context_store is not None:
+            try:
+                context = self._context_store.get(request_id)
+            except Exception:
+                logger.exception(
+                    "Failed to retrieve context for request_id=%s", request_id
+                )
+
+        await self.service.process_feedback(
+            request_id, feedback, context=context
+        )
 
     def metrics_snapshot(self) -> dict[str, float]:
         """Return the latest business metrics from the service."""
         return self._metrics_snapshot()
+
+    # -- context store -------------------------------------------------------
+
+    def _create_context_store(self) -> Any | None:
+        """Create a context store based on config.
+
+        Uses DynamoDB when a table name is configured and AWS credentials
+        are available; falls back to in-memory for local development.
+        """
+        table_name = self._config.state_table_name
+        if not table_name:
+            return None
+
+        try:
+            from ml_platform.serving.context_store import DynamoDBContextStore
+
+            store = DynamoDBContextStore(
+                table_name=table_name,
+                region=self._config.aws_region,
+                ttl_s=self._config.state_ttl_s,
+            )
+            logger.info("Context store: DynamoDB table %s", table_name)
+            return store
+        except Exception:
+            from ml_platform.serving.context_store import InMemoryContextStore
+
+            logger.info(
+                "DynamoDB unavailable for table %s; using in-memory context store",
+                table_name,
+            )
+            return InMemoryContextStore()
 
     # -- background loops ----------------------------------------------------
 
@@ -319,6 +517,28 @@ class AgentRuntime(BaseRuntime):
             raise RuntimeError("AgentRuntime has not been started")
         return self._service
 
+    def _get_service_for_scheduling(self) -> Any | None:
+        return self._service
+
+    def _register_health_checks(self) -> None:
+        from ml_platform.health import HealthCheck
+
+        if self._health_registry is None:
+            return
+
+        self._health_registry.register(HealthCheck(
+            name="service_instance",
+            check=lambda: self._service is not None,
+            critical=True,
+            description="Agent service class instantiated",
+        ))
+        self._health_registry.register(HealthCheck(
+            name="providers",
+            check=lambda: len(self._providers) > 0,
+            critical=True,
+            description="At least one LLM provider registered",
+        ))
+
     async def _on_startup(self) -> None:
         from ml_platform._interfaces import Tool
 
@@ -330,9 +550,41 @@ class AgentRuntime(BaseRuntime):
         self._service = self._service_cls(**self._service_kwargs)
         self._service.providers = self._providers
         self._service.tools = self._tools
+        self._service.conversation_store = self._create_conversation_store()
 
     async def _on_shutdown(self) -> None:
         pass
+
+    def _create_conversation_store(self) -> Any | None:
+        """Create a conversation store based on agent config."""
+        agent_cfg = self._config.agent
+        if agent_cfg is None or not agent_cfg.conversation_table_name:
+            return None
+
+        try:
+            from ml_platform.serving.conversation_store import (
+                DynamoDBConversationStore,
+            )
+
+            store = DynamoDBConversationStore(
+                table_name=agent_cfg.conversation_table_name,
+                region=self._config.aws_region,
+                ttl_s=agent_cfg.conversation_ttl_s,
+            )
+            logger.info(
+                "Conversation store: DynamoDB table %s",
+                agent_cfg.conversation_table_name,
+            )
+            return store
+        except Exception:
+            from ml_platform.serving.conversation_store import (
+                InMemoryConversationStore,
+            )
+
+            logger.info(
+                "DynamoDB unavailable for conversations; using in-memory store"
+            )
+            return InMemoryConversationStore()
 
     def _metrics_snapshot(self) -> dict[str, float]:
         snapshot: dict[str, float] = {}

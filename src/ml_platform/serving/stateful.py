@@ -97,13 +97,22 @@ class StatefulServiceBase(ABC):
 
     @abstractmethod
     async def process_feedback(
-        self, request_id: str, feedback: dict[str, Any]
+        self,
+        request_id: str,
+        feedback: dict[str, Any],
+        *,
+        context: dict[str, Any] | None = None,
     ) -> None:
         """Update model state with delayed feedback.
 
         Args:
             request_id: Identifier from the original ``PredictionResult``.
             feedback: Project-specific signal (e.g., reward, label).
+            context: Prediction context automatically retrieved by the
+                runtime from the context store.  Contains ``payload``,
+                ``prediction``, and ``metadata`` from the original
+                ``predict()`` call.  ``None`` if context storage is
+                disabled or the entry expired.
         """
         ...
 
@@ -179,10 +188,16 @@ def create_stateful_app(
         service_cls, config, service_kwargs=service_kwargs
     )
 
+    def _alert_status() -> list[dict[str, Any]]:
+        ev = runtime.alert_evaluator
+        return ev.get_status() if ev is not None else []
+
     app = build_base_app(
         config,
         readiness_check=lambda: runtime.is_ready,
         metrics_source=lambda: runtime.metrics_snapshot(),
+        alert_status=_alert_status,
+        health_registry=runtime.health_registry,
         dashboard_type="stateful",
     )
 

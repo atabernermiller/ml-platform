@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, fields
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from ml_platform.alerting import AlertRule
 
 
 # ---------------------------------------------------------------------------
@@ -54,11 +57,17 @@ class LLMConfig:
             disables budget enforcement.
         cost_alert_threshold_usd: Emit an alert when cumulative daily cost
             exceeds this value.  ``0.0`` disables alerts.
+        conversation_table_name: DynamoDB table for conversation history.
+            Empty string disables automatic conversation storage.
+        conversation_ttl_s: TTL for conversation messages in seconds
+            (default: 7 days).
     """
 
     default_model: str = ""
     token_budget_daily: int = 0
     cost_alert_threshold_usd: float = 0.0
+    conversation_table_name: str = ""
+    conversation_ttl_s: int = 604_800
 
 
 @dataclass(frozen=True)
@@ -71,11 +80,17 @@ class AgentConfig:
         tool_timeout_s: Maximum wall-clock time for a single tool execution.
         max_concurrent_tool_calls: Upper limit on tools running in parallel
             within a single run.
+        conversation_table_name: DynamoDB table for conversation history.
+            Empty string disables automatic conversation storage.
+        conversation_ttl_s: TTL for conversation messages in seconds
+            (default: 7 days).
     """
 
     max_steps_per_run: int = 20
     tool_timeout_s: float = 30.0
     max_concurrent_tool_calls: int = 5
+    conversation_table_name: str = ""
+    conversation_ttl_s: int = 604_800
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +116,16 @@ class ServiceConfig:
         mlflow_tracking_uri: MLflow tracking server URI.  Empty disables.
         mlflow_experiment_name: MLflow experiment name; defaults to
             ``service_name``.
+        log_level: Log level for the ``ml_platform`` logger and root
+            logger (e.g. ``"DEBUG"``, ``"INFO"``).
+        log_format: Log output format: ``"json"`` for production,
+            ``"text"`` for development, ``""`` (empty) to skip
+            auto-configuration and let the user manage logging.
+        alerts: List of :class:`~ml_platform.alerting.AlertRule`
+            instances to evaluate on every metric cycle.
+        alert_webhook_url: URL to POST JSON alert events to (e.g.
+            Slack webhook, PagerDuty endpoint).  Empty disables
+            webhook notifications.
         profile: Cloud profile that bundles backend implementations.
             ``None`` means auto-detect (local if no AWS credentials,
             AWS otherwise).
@@ -121,6 +146,10 @@ class ServiceConfig:
     metrics_interval_s: int = 60
     mlflow_tracking_uri: str = ""
     mlflow_experiment_name: str = ""
+    log_level: str = "INFO"
+    log_format: Literal["json", "text", ""] = ""
+    alerts: list[AlertRule] = field(default_factory=list)
+    alert_webhook_url: str = ""
 
     profile: Any = None
 

@@ -67,26 +67,46 @@ class AgentServiceBase(ABC):
     (e.g., planning + tool use + synthesis).  For single-call apps, use
     ``LLMServiceBase`` instead.
 
-    The framework sets :attr:`providers` and :attr:`tools` before the
-    first call to :meth:`run`.  Use ``run_context.complete()`` and
-    ``run_context.execute_tool()`` inside :meth:`run` for automatic
-    observability.
+    The framework sets :attr:`providers`, :attr:`tools`, and
+    :attr:`conversation_store` before the first call to :meth:`run`.
+    Use ``run_context.complete()`` and ``run_context.execute_tool()``
+    inside :meth:`run` for automatic observability.  Use
+    :attr:`conversation_store` to persist and retrieve multi-turn
+    session history.
 
     Example::
 
         class MyAgent(AgentServiceBase):
             async def run(self, messages, *, run_context, **kwargs):
+                session_id = kwargs.get("session_id", "default")
+                if self.conversation_store:
+                    history = self.conversation_store.get_history(
+                        session_id, max_messages=20,
+                    )
+                    messages = history + messages
+
                 plan = await run_context.complete(
                     self.providers["planner"], messages,
                 )
                 result = await run_context.execute_tool(
                     self.tools["search"], query="...",
                 )
-                return AgentResult(
+
+                response = AgentResult(
                     content=result.content,
                     steps=run_context.steps,
                     messages=messages,
                 )
+
+                if self.conversation_store:
+                    for m in messages:
+                        self.conversation_store.append(session_id, m)
+                    self.conversation_store.append(
+                        session_id,
+                        Message(role="assistant", content=response.content),
+                    )
+
+                return response
     """
 
     providers: dict[str, LLMProvider]
@@ -94,6 +114,9 @@ class AgentServiceBase(ABC):
 
     tools: dict[str, Tool]
     """Named tools set by the framework before serving begins."""
+
+    conversation_store: Any
+    """Conversation store set by the framework (or ``None`` if disabled)."""
 
     @abstractmethod
     async def run(
@@ -219,10 +242,16 @@ def create_agent_app(
         service_kwargs=service_kwargs,
     )
 
+    def _alert_status() -> list[dict[str, Any]]:
+        ev = runtime.alert_evaluator
+        return ev.get_status() if ev is not None else []
+
     app = build_base_app(
         config,
         readiness_check=lambda: runtime.is_ready,
         metrics_source=lambda: runtime.metrics_snapshot(),
+        alert_status=_alert_status,
+        health_registry=runtime.health_registry,
         dashboard_type="agent",
     )
 
