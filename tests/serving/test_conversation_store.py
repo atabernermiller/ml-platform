@@ -89,11 +89,11 @@ def _create_conversation_table(table_name: str = "test-conversations") -> None:
         TableName=table_name,
         AttributeDefinitions=[
             {"AttributeName": "session_id", "AttributeType": "S"},
-            {"AttributeName": "message_idx", "AttributeType": "N"},
+            {"AttributeName": "ts_ns", "AttributeType": "N"},
         ],
         KeySchema=[
             {"AttributeName": "session_id", "KeyType": "HASH"},
-            {"AttributeName": "message_idx", "KeyType": "RANGE"},
+            {"AttributeName": "ts_ns", "KeyType": "RANGE"},
         ],
         BillingMode="PAY_PER_REQUEST",
     )
@@ -185,3 +185,50 @@ class TestApplyTokenWindow:
         ]
         result = _apply_token_window(messages, max_tokens=1000)
         assert len(result) == 2
+
+    def test_pluggable_tokenizer(self) -> None:
+        """Token window should respect a custom tokenizer."""
+        messages = [
+            Message(role="user", content="aaaa"),
+            Message(role="user", content="bb"),
+        ]
+        exact_len = lambda text: len(text)
+        result = _apply_token_window(messages, max_tokens=3, tokenizer=exact_len)
+        assert len(result) == 1
+        assert result[0].content == "bb"
+
+
+# ---------------------------------------------------------------------------
+# Bounded InMemoryConversationStore
+# ---------------------------------------------------------------------------
+
+
+class TestBoundedInMemoryConversationStore:
+    def test_lru_eviction(self) -> None:
+        store = InMemoryConversationStore(max_sessions=2)
+        store.append("s1", Message(role="user", content="a"))
+        store.append("s2", Message(role="user", content="b"))
+        store.append("s3", Message(role="user", content="c"))
+
+        assert store.get_history("s1") == []
+        assert len(store.get_history("s2")) == 1
+        assert len(store.get_history("s3")) == 1
+
+    def test_max_messages_per_session(self) -> None:
+        store = InMemoryConversationStore(max_messages_per_session=3)
+        for i in range(5):
+            store.append("s1", Message(role="user", content=f"msg {i}"))
+
+        history = store.get_history("s1")
+        assert len(history) == 3
+        assert history[0].content == "msg 2"
+
+    def test_access_refreshes_lru(self) -> None:
+        store = InMemoryConversationStore(max_sessions=2)
+        store.append("s1", Message(role="user", content="a"))
+        store.append("s2", Message(role="user", content="b"))
+        store.append("s1", Message(role="user", content="a2"))
+        store.append("s3", Message(role="user", content="c"))
+
+        assert store.get_history("s2") == []
+        assert len(store.get_history("s1")) == 2

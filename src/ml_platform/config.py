@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 if TYPE_CHECKING:
+    from ml_platform._interfaces import Profile
     from ml_platform.alerting import AlertRule
 
 
@@ -151,7 +152,7 @@ class ServiceConfig:
     alerts: list[AlertRule] = field(default_factory=list)
     alert_webhook_url: str = ""
 
-    profile: Any = None
+    profile: Profile | None = None
 
     stateful: StatefulConfig | None = None
     llm: LLMConfig | None = None
@@ -164,6 +165,11 @@ class ServiceConfig:
     state_backend: Literal["dynamodb", "redis"] = "dynamodb"
     state_table_name: str = ""
     state_ttl_s: int = 86_400
+
+    _REDACTED_FIELDS: ClassVar[frozenset[str]] = frozenset({
+        "alert_webhook_url",
+        "mlflow_tracking_uri",
+    })
 
     def __post_init__(self) -> None:
         if not self.mlflow_experiment_name:
@@ -185,6 +191,15 @@ class ServiceConfig:
                     s3_checkpoint_prefix=self.s3_checkpoint_prefix,
                 ),
             )
+
+    def __repr__(self) -> str:
+        parts = []
+        for f in fields(self):
+            val = getattr(self, f.name)
+            if f.name in self._REDACTED_FIELDS and val:
+                val = "***"
+            parts.append(f"{f.name}={val!r}")
+        return f"ServiceConfig({', '.join(parts)})"
 
     @classmethod
     def from_env(cls, **overrides: object) -> ServiceConfig:
@@ -208,7 +223,7 @@ class ServiceConfig:
         """
         env_map: dict[str, object] = {}
         for f in fields(cls):
-            if f.name in ("profile", "stateful", "llm", "agent"):
+            if f.name in ("profile", "stateful", "llm", "agent", "alerts"):
                 continue
             env_key = f"ML_PLATFORM_{f.name.upper()}"
             env_val = os.environ.get(env_key)
@@ -232,12 +247,25 @@ class ServiceConfig:
 
 
 def _coerce(type_hint: str, raw: str) -> object:
-    """Best-effort coercion from env-var string to the declared type."""
-    if type_hint == "int":
-        return int(raw)
-    if type_hint == "float":
-        return float(raw)
-    if type_hint == "bool":
+    """Best-effort coercion from env-var string to the declared type.
+
+    Handles plain types (``int``, ``float``, ``bool``, ``str``) as well
+    as ``Literal[...]`` and ``Optional[T]`` / ``T | None`` patterns that
+    appear in type-hint string representations.
+    """
+    hint = type_hint.strip()
+
+    if "int" in hint and "Literal" not in hint:
+        try:
+            return int(raw)
+        except ValueError:
+            return raw
+    if "float" in hint:
+        try:
+            return float(raw)
+        except ValueError:
+            return raw
+    if hint == "bool":
         return raw.lower() in ("1", "true", "yes")
     return raw
 

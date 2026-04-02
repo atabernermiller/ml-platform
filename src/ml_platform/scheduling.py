@@ -36,6 +36,7 @@ exiting.
 from __future__ import annotations
 
 import asyncio
+import collections
 import inspect
 import logging
 import time
@@ -207,7 +208,7 @@ class TaskRunner:
         self._service_name = service_name
         self._tasks: list[ScheduledTask] = []
         self._handles: list[asyncio.Task[None]] = []
-        self._executions: list[TaskExecution] = []
+        self._executions: collections.deque[TaskExecution] = collections.deque(maxlen=1000)
         self._running: bool = False
 
     @property
@@ -218,7 +219,7 @@ class TaskRunner:
     @property
     def recent_executions(self) -> list[TaskExecution]:
         """Recent task execution records (most recent first, capped at 100)."""
-        return list(reversed(self._executions[-100:]))
+        return list(reversed(list(self._executions)[-100:]))
 
     def register(self, task: ScheduledTask) -> None:
         """Add a task to be managed.
@@ -300,9 +301,6 @@ class TaskRunner:
         for attempt in range(1, task.max_retries + 2):
             execution = await self._execute_once(task, attempt)
             self._executions.append(execution)
-            if len(self._executions) > 1000:
-                self._executions = self._executions[-500:]
-
             self._emit_task_metrics(execution)
 
             if execution.success:

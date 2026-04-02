@@ -99,9 +99,9 @@ class _RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        from ml_platform.log import bind, clear_context
+        from ml_platform.log import _log_context, bind
 
-        clear_context()
+        _log_context.set({})
 
         request_id = (
             request.headers.get("x-request-id")

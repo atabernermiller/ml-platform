@@ -84,8 +84,12 @@ def generate_stack_template(
 
     # -- Optional DynamoDB tables --------------------------------------------
     if manifest.features.conversation_store:
-        resources["ConversationTable"] = _dynamodb_table(
-            f"{svc}-conversations", ttl_attr="ttl"
+        resources["ConversationTable"] = _dynamodb_table_composite(
+            f"{svc}-conversations",
+            pk_name="session_id",
+            sk_name="ts_ns",
+            sk_type="N",
+            ttl_attr="ttl",
         )
     if manifest.features.context_store:
         resources["ContextTable"] = _dynamodb_table(
@@ -444,6 +448,37 @@ def _dynamodb_table(table_name: str, ttl_attr: str = "ttl") -> dict[str, Any]:
                 {"AttributeName": "pk", "AttributeType": "S"}
             ],
             "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+            "TimeToLiveSpecification": {
+                "AttributeName": ttl_attr,
+                "Enabled": True,
+            },
+        },
+    }
+
+
+def _dynamodb_table_composite(
+    table_name: str,
+    *,
+    pk_name: str = "pk",
+    pk_type: str = "S",
+    sk_name: str = "sk",
+    sk_type: str = "S",
+    ttl_attr: str = "ttl",
+) -> dict[str, Any]:
+    """CloudFormation resource for a DynamoDB table with a composite key."""
+    return {
+        "Type": "AWS::DynamoDB::Table",
+        "Properties": {
+            "TableName": table_name,
+            "BillingMode": "PAY_PER_REQUEST",
+            "AttributeDefinitions": [
+                {"AttributeName": pk_name, "AttributeType": pk_type},
+                {"AttributeName": sk_name, "AttributeType": sk_type},
+            ],
+            "KeySchema": [
+                {"AttributeName": pk_name, "KeyType": "HASH"},
+                {"AttributeName": sk_name, "KeyType": "RANGE"},
+            ],
             "TimeToLiveSpecification": {
                 "AttributeName": ttl_attr,
                 "Enabled": True,

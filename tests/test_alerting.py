@@ -109,21 +109,23 @@ class TestAlertEvent:
 
 
 class TestLogNotifier:
-    def test_firing_logged_at_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    @pytest.mark.asyncio
+    async def test_firing_logged_at_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         rule = AlertRule(metric="x", condition=">", threshold=10, name="test-alert")
         event = AlertEvent(rule=rule, state=AlertState.FIRING, current_value=15)
         notifier = LogNotifier()
         with caplog.at_level("WARNING", logger="ml_platform.alerting"):
-            notifier.notify(event)
+            await notifier.notify(event)
         assert "ALERT FIRING" in caplog.text
         assert "test-alert" in caplog.text
 
-    def test_resolved_logged_at_info(self, caplog: pytest.LogCaptureFixture) -> None:
+    @pytest.mark.asyncio
+    async def test_resolved_logged_at_info(self, caplog: pytest.LogCaptureFixture) -> None:
         rule = AlertRule(metric="x", condition=">", threshold=10, name="test-alert")
         event = AlertEvent(rule=rule, state=AlertState.RESOLVED, current_value=5)
         notifier = LogNotifier()
         with caplog.at_level("INFO", logger="ml_platform.alerting"):
-            notifier.notify(event)
+            await notifier.notify(event)
         assert "ALERT RESOLVED" in caplog.text
 
 
@@ -133,7 +135,8 @@ class TestLogNotifier:
 
 
 class TestWebhookNotifier:
-    def test_sends_json_post(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sends_json_post(self) -> None:
         notifier = WebhookNotifier("https://example.com/hook")
         rule = AlertRule(metric="x", condition=">", threshold=10, name="test")
         event = AlertEvent(
@@ -141,7 +144,7 @@ class TestWebhookNotifier:
         )
 
         with mock.patch("urllib.request.urlopen") as mock_open:
-            notifier.notify(event)
+            await notifier.notify(event)
 
         mock_open.assert_called_once()
         req = mock_open.call_args[0][0]
@@ -150,7 +153,8 @@ class TestWebhookNotifier:
         assert body["alert_name"] == "test"
         assert body["state"] == "firing"
 
-    def test_slack_format(self) -> None:
+    @pytest.mark.asyncio
+    async def test_slack_format(self) -> None:
         notifier = WebhookNotifier("https://hooks.slack.com/services/T/B/X")
         rule = AlertRule(metric="x", condition=">", threshold=10, name="test")
         event = AlertEvent(
@@ -158,20 +162,21 @@ class TestWebhookNotifier:
         )
 
         with mock.patch("urllib.request.urlopen") as mock_open:
-            notifier.notify(event)
+            await notifier.notify(event)
 
         body = json.loads(mock_open.call_args[0][0].data)
         assert "text" in body
         assert "FIRING" in body["text"]
 
-    def test_failure_does_not_raise(self, caplog: pytest.LogCaptureFixture) -> None:
+    @pytest.mark.asyncio
+    async def test_failure_does_not_raise(self, caplog: pytest.LogCaptureFixture) -> None:
         notifier = WebhookNotifier("https://example.com/hook")
         rule = AlertRule(metric="x", condition=">", threshold=10, name="test")
         event = AlertEvent(rule=rule, state=AlertState.FIRING, current_value=15)
 
         with mock.patch("urllib.request.urlopen", side_effect=Exception("network")):
             with caplog.at_level("ERROR"):
-                notifier.notify(event)
+                await notifier.notify(event)
 
         assert "Failed to send webhook" in caplog.text
 
@@ -187,123 +192,133 @@ class _RecordingNotifier:
     def __init__(self) -> None:
         self.events: list[AlertEvent] = []
 
-    def notify(self, event: AlertEvent) -> None:
+    async def notify(self, event: AlertEvent) -> None:
         self.events.append(event)
 
 
 class TestAlertEvaluator:
-    def test_fires_immediately_when_no_window(self) -> None:
+    @pytest.mark.asyncio
+    async def test_fires_immediately_when_no_window(self) -> None:
         rule = AlertRule(metric="x", condition=">", threshold=10, name="r1")
         recorder = _RecordingNotifier()
         ev = AlertEvaluator([rule], notifiers=[recorder], service_name="svc")
 
-        events = ev.evaluate({"x": 15}, now=100)
+        events = await ev.evaluate({"x": 15}, now=100)
         assert len(events) == 1
         assert events[0].state == AlertState.FIRING
         assert events[0].current_value == 15
 
-    def test_resolves_immediately_when_no_window(self) -> None:
+    @pytest.mark.asyncio
+    async def test_resolves_immediately_when_no_window(self) -> None:
         rule = AlertRule(metric="x", condition=">", threshold=10, name="r1")
         recorder = _RecordingNotifier()
         ev = AlertEvaluator([rule], notifiers=[recorder])
 
-        ev.evaluate({"x": 15}, now=100)
-        events = ev.evaluate({"x": 5}, now=101)
+        await ev.evaluate({"x": 15}, now=100)
+        events = await ev.evaluate({"x": 5}, now=101)
         assert len(events) == 1
         assert events[0].state == AlertState.RESOLVED
 
-    def test_no_re_notification_while_firing(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_re_notification_while_firing(self) -> None:
         rule = AlertRule(metric="x", condition=">", threshold=10, name="r1")
         recorder = _RecordingNotifier()
         ev = AlertEvaluator([rule], notifiers=[recorder])
 
-        ev.evaluate({"x": 15}, now=100)
-        events = ev.evaluate({"x": 20}, now=101)
+        await ev.evaluate({"x": 15}, now=100)
+        events = await ev.evaluate({"x": 20}, now=101)
         assert len(events) == 0
         assert len(recorder.events) == 1
 
-    def test_window_delays_firing(self) -> None:
+    @pytest.mark.asyncio
+    async def test_window_delays_firing(self) -> None:
         rule = AlertRule(
             metric="x", condition=">", threshold=10, name="r1", window_s=60
         )
         recorder = _RecordingNotifier()
         ev = AlertEvaluator([rule], notifiers=[recorder])
 
-        events = ev.evaluate({"x": 15}, now=100)
+        events = await ev.evaluate({"x": 15}, now=100)
         assert len(events) == 0
 
-        events = ev.evaluate({"x": 15}, now=130)
+        events = await ev.evaluate({"x": 15}, now=130)
         assert len(events) == 0
 
-        events = ev.evaluate({"x": 15}, now=160)
+        events = await ev.evaluate({"x": 15}, now=160)
         assert len(events) == 1
         assert events[0].state == AlertState.FIRING
 
-    def test_window_resets_if_condition_clears(self) -> None:
+    @pytest.mark.asyncio
+    async def test_window_resets_if_condition_clears(self) -> None:
         rule = AlertRule(
             metric="x", condition=">", threshold=10, name="r1", window_s=60
         )
         recorder = _RecordingNotifier()
         ev = AlertEvaluator([rule], notifiers=[recorder])
 
-        ev.evaluate({"x": 15}, now=100)
-        ev.evaluate({"x": 5}, now=130)
-        ev.evaluate({"x": 15}, now=160)
-        events = ev.evaluate({"x": 15}, now=220)
+        await ev.evaluate({"x": 15}, now=100)
+        await ev.evaluate({"x": 5}, now=130)
+        await ev.evaluate({"x": 15}, now=160)
+        events = await ev.evaluate({"x": 15}, now=220)
         assert len(events) == 1
 
-    def test_window_delays_resolution(self) -> None:
+    @pytest.mark.asyncio
+    async def test_window_delays_resolution(self) -> None:
         rule = AlertRule(
             metric="x", condition=">", threshold=10, name="r1", window_s=60
         )
         recorder = _RecordingNotifier()
         ev = AlertEvaluator([rule], notifiers=[recorder])
 
-        ev.evaluate({"x": 15}, now=100)
-        ev.evaluate({"x": 15}, now=160)
+        await ev.evaluate({"x": 15}, now=100)
+        await ev.evaluate({"x": 15}, now=160)
         assert len(recorder.events) == 1
 
-        events = ev.evaluate({"x": 5}, now=200)
+        events = await ev.evaluate({"x": 5}, now=200)
         assert len(events) == 0
 
-        events = ev.evaluate({"x": 5}, now=260)
+        events = await ev.evaluate({"x": 5}, now=260)
         assert len(events) == 1
         assert events[0].state == AlertState.RESOLVED
 
-    def test_ignores_missing_metric(self) -> None:
+    @pytest.mark.asyncio
+    async def test_ignores_missing_metric(self) -> None:
         rule = AlertRule(metric="x", condition=">", threshold=10, name="r1")
         ev = AlertEvaluator([rule])
-        events = ev.evaluate({"y": 100}, now=100)
+        events = await ev.evaluate({"y": 100}, now=100)
         assert len(events) == 0
 
-    def test_multiple_rules(self) -> None:
+    @pytest.mark.asyncio
+    async def test_multiple_rules(self) -> None:
         r1 = AlertRule(metric="a", condition=">", threshold=10, name="r1")
         r2 = AlertRule(metric="b", condition="<", threshold=5, name="r2")
         recorder = _RecordingNotifier()
         ev = AlertEvaluator([r1, r2], notifiers=[recorder])
 
-        events = ev.evaluate({"a": 15, "b": 3}, now=100)
+        events = await ev.evaluate({"a": 15, "b": 3}, now=100)
         assert len(events) == 2
 
-    def test_get_status(self) -> None:
+    @pytest.mark.asyncio
+    async def test_get_status(self) -> None:
         r1 = AlertRule(metric="x", condition=">", threshold=10, name="r1")
         ev = AlertEvaluator([r1])
-        ev.evaluate({"x": 15}, now=100)
+        await ev.evaluate({"x": 15}, now=100)
 
         status = ev.get_status()
         assert len(status) == 1
         assert status[0]["name"] == "r1"
         assert status[0]["state"] == "firing"
 
-    def test_notifier_failure_does_not_crash_evaluator(self) -> None:
+    @pytest.mark.asyncio
+    async def test_notifier_failure_does_not_crash_evaluator(self) -> None:
         class _BrokenNotifier:
-            def notify(self, event: AlertEvent) -> None:
+            async def notify(self, event: AlertEvent) -> None:
                 raise RuntimeError("boom")
 
         rule = AlertRule(metric="x", condition=">", threshold=10, name="r1")
         ev = AlertEvaluator([rule], notifiers=[_BrokenNotifier()])
 
-        events = ev.evaluate({"x": 15}, now=100)
+        events = await ev.evaluate({"x": 15}, now=100)
         assert len(events) == 1
 
 

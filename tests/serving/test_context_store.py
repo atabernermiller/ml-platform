@@ -20,6 +20,17 @@ def test_in_memory_put_get() -> None:
     assert store.get("req-1") is None
 
 
+def test_in_memory_lru_eviction() -> None:
+    store = InMemoryContextStore(maxlen=2)
+    store.put("a", {"v": 1})
+    store.put("b", {"v": 2})
+    store.put("c", {"v": 3})
+
+    assert store.get("a") is None
+    assert store.get("b") == {"v": 2}
+    assert store.get("c") == {"v": 3}
+
+
 def test_dynamodb_put_get(mock_dynamodb: None) -> None:
     store = DynamoDBContextStore(
         table_name="test-context",

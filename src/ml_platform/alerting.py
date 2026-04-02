@@ -44,8 +44,10 @@ Notification backends:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import operator as _op
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -59,6 +61,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 Condition = Literal[">", ">=", "<", "<=", "==", "!="]
+
+_CONDITION_OPS: dict[str, Any] = {
+    ">": _op.gt,
+    ">=": _op.ge,
+    "<": _op.lt,
+    "<=": _op.le,
+    "==": _op.eq,
+    "!=": _op.ne,
+}
 
 
 @dataclass(frozen=True)
@@ -102,15 +113,7 @@ class AlertRule:
         Returns:
             Whether the threshold is breached.
         """
-        ops = {
-            ">": value > self.threshold,
-            ">=": value >= self.threshold,
-            "<": value < self.threshold,
-            "<=": value <= self.threshold,
-            "==": value == self.threshold,
-            "!=": value != self.threshold,
-        }
-        return ops[self.condition]
+        return _CONDITION_OPS[self.condition](value, self.threshold)
 
 
 class AlertState(str, Enum):
@@ -164,7 +167,7 @@ class AlertEvent:
 class AlertNotifier(Protocol):
     """Protocol for alert notification backends."""
 
-    def notify(self, event: AlertEvent) -> None:
+    async def notify(self, event: AlertEvent) -> None:
         """Send a notification for an alert state transition.
 
         Args:
@@ -180,7 +183,7 @@ class LogNotifier:
     whether external notification backends are configured.
     """
 
-    def notify(self, event: AlertEvent) -> None:
+    async def notify(self, event: AlertEvent) -> None:
         """Log the alert event at WARNING (firing) or INFO (resolved).
 
         Args:
@@ -213,12 +216,8 @@ class WebhookNotifier:
     Compatible with Slack incoming webhooks, Discord webhooks,
     PagerDuty Events API v2, and any endpoint that accepts JSON.
 
-    The payload is a JSON object with keys: ``alert_name``, ``metric``,
-    ``condition``, ``current_value``, ``state``, ``severity``,
-    ``description``, ``service``, ``timestamp``.
-
-    For Slack, the notifier wraps the message in the ``text`` field
-    expected by the Slack API.
+    The HTTP POST is dispatched to a thread pool so it never blocks
+    the asyncio event loop.
 
     Args:
         url: The webhook endpoint URL.
@@ -234,12 +233,17 @@ class WebhookNotifier:
         """The configured webhook URL."""
         return self._url
 
-    def notify(self, event: AlertEvent) -> None:
-        """POST the alert event to the webhook URL.
+    async def notify(self, event: AlertEvent) -> None:
+        """POST the alert event to the webhook URL without blocking the event loop.
 
         Args:
             event: The alert event.
         """
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._send_sync, event)
+
+    def _send_sync(self, event: AlertEvent) -> None:
+        """Synchronous HTTP POST, intended to run in a thread pool."""
         import urllib.request
 
         payload = event.to_dict()
@@ -317,7 +321,7 @@ class AlertEvaluator:
         """The configured alert rules."""
         return list(self._rules)
 
-    def evaluate(
+    async def evaluate(
         self,
         metrics: dict[str, float],
         *,
@@ -344,7 +348,7 @@ class AlertEvaluator:
             violated = rule.evaluate(value)
             rs = self._states[rule.name]
 
-            event = self._update_state(rule, rs, violated, value, now)
+            event = await self._update_state(rule, rs, violated, value, now)
             if event is not None:
                 events.append(event)
 
@@ -369,7 +373,7 @@ class AlertEvaluator:
             })
         return result
 
-    def _update_state(
+    async def _update_state(
         self,
         rule: AlertRule,
         rs: _RuleState,
@@ -385,7 +389,7 @@ class AlertEvaluator:
                 if rule.window_s == 0:
                     rs.state = AlertState.FIRING
                     rs.violation_since = now
-                    return self._fire(rule, AlertState.FIRING, value, now)
+                    return await self._fire(rule, AlertState.FIRING, value, now)
                 else:
                     rs.state = AlertState.PENDING
                     rs.violation_since = now
@@ -395,10 +399,9 @@ class AlertEvaluator:
                 elapsed = now - (rs.violation_since or now)
                 if elapsed >= rule.window_s:
                     rs.state = AlertState.FIRING
-                    return self._fire(rule, AlertState.FIRING, value, now)
+                    return await self._fire(rule, AlertState.FIRING, value, now)
                 return None
 
-            # Already FIRING -- no re-notification
             return None
 
         else:
@@ -413,7 +416,7 @@ class AlertEvaluator:
                 if rule.window_s == 0:
                     rs.state = AlertState.RESOLVED
                     rs.ok_since = now
-                    event = self._fire(rule, AlertState.RESOLVED, value, now)
+                    event = await self._fire(rule, AlertState.RESOLVED, value, now)
                     rs.state = AlertState.OK
                     return event
                 else:
@@ -423,7 +426,7 @@ class AlertEvaluator:
                     elapsed = now - rs.ok_since
                     if elapsed >= rule.window_s:
                         rs.state = AlertState.RESOLVED
-                        event = self._fire(rule, AlertState.RESOLVED, value, now)
+                        event = await self._fire(rule, AlertState.RESOLVED, value, now)
                         rs.state = AlertState.OK
                         rs.ok_since = None
                         return event
@@ -431,7 +434,7 @@ class AlertEvaluator:
 
             return None
 
-    def _fire(
+    async def _fire(
         self,
         rule: AlertRule,
         state: AlertState,
@@ -448,7 +451,7 @@ class AlertEvaluator:
         )
         for notifier in self._notifiers:
             try:
-                notifier.notify(event)
+                await notifier.notify(event)
             except Exception:
                 logger.exception(
                     "Notifier %s failed for alert %s",

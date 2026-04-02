@@ -13,42 +13,21 @@ Two backends are provided:
 
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import time
-from abc import ABC, abstractmethod
 from typing import Any
+
+from ml_platform._interfaces import ContextStore
 
 logger = logging.getLogger(__name__)
 
-
-class ContextStore(ABC):
-    """Abstract interface for context persistence between predict and feedback."""
-
-    @abstractmethod
-    def put(self, request_id: str, context: dict[str, Any]) -> None:
-        """Store context for a prediction request.
-
-        Args:
-            request_id: Unique prediction identifier.
-            context: Serialisable context data to store.
-        """
-        ...
-
-    @abstractmethod
-    def get(self, request_id: str) -> dict[str, Any] | None:
-        """Retrieve and delete context for a request.
-
-        This is a consume-once operation; the entry is removed after retrieval
-        to avoid unbounded storage growth.
-
-        Args:
-            request_id: Unique prediction identifier.
-
-        Returns:
-            Stored context, or ``None`` if the key does not exist or has expired.
-        """
-        ...
+__all__ = [
+    "ContextStore",
+    "DynamoDBContextStore",
+    "InMemoryContextStore",
+]
 
 
 class DynamoDBContextStore(ContextStore):
@@ -114,13 +93,25 @@ class DynamoDBContextStore(ContextStore):
 class InMemoryContextStore(ContextStore):
     """In-memory context store for local development and testing.
 
-    Entries are never expired; the store grows without bound.
+    Entries are evicted on an LRU basis once ``maxlen`` is reached.
+
+    Args:
+        maxlen: Maximum number of entries to retain.  Oldest entries are
+            discarded when the limit is exceeded.
     """
 
-    def __init__(self) -> None:
-        self._store: dict[str, dict[str, Any]] = {}
+    def __init__(self, maxlen: int = 100_000) -> None:
+        self._store: collections.OrderedDict[str, dict[str, Any]] = (
+            collections.OrderedDict()
+        )
+        self._maxlen = maxlen
 
     def put(self, request_id: str, context: dict[str, Any]) -> None:
+        if request_id in self._store:
+            self._store.move_to_end(request_id)
+        else:
+            if len(self._store) >= self._maxlen:
+                self._store.popitem(last=False)
         self._store[request_id] = context
 
     def get(self, request_id: str) -> dict[str, Any] | None:

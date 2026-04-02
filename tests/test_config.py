@@ -49,6 +49,18 @@ class TestServiceConfig:
         c = ServiceConfig(service_name="svc")
         assert c.stateful is None
 
+    def test_repr_redacts_sensitive(self) -> None:
+        c = ServiceConfig(
+            service_name="svc",
+            alert_webhook_url="https://secret.slack.com/hook",
+            mlflow_tracking_uri="http://mlflow:5000",
+        )
+        r = repr(c)
+        assert "secret.slack.com" not in r
+        assert "mlflow:5000" not in r
+        assert "'***'" in r
+        assert "service_name='svc'" in r
+
 
 class TestAgentConfigDefaults:
     def test_defaults(self) -> None:
