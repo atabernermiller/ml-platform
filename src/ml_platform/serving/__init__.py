@@ -12,6 +12,7 @@ from ml_platform.serving.conversation_store import (
     InMemoryConversationStore,
 )
 from ml_platform.serving.runtime import AgentRuntime, BaseRuntime, StatefulRuntime
+from ml_platform.serving.sagemaker import wrap_for_sagemaker
 from ml_platform.serving.schemas import FeedbackRequest, PredictRequest, PredictResponse
 from ml_platform.serving.state_manager import S3StateManager
 from ml_platform.serving.stateful import (
@@ -39,4 +40,5 @@ __all__ = [
     "StatefulServiceBase",
     "create_agent_app",
     "create_stateful_app",
+    "wrap_for_sagemaker",
 ]

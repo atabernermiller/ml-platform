@@ -5,8 +5,10 @@ Usage::
     ml-platform check     --service-name my-svc --s3-bucket my-ckpt --region us-east-1
     ml-platform bootstrap --service-name my-svc --s3-bucket my-ckpt --region us-east-1
     ml-platform init      --template agent --name my-agent
-    ml-platform deploy aws --service-name my-chatbot
-    ml-platform destroy aws --service-name my-chatbot
+    ml-platform deploy aws       --service-name my-chatbot
+    ml-platform deploy sagemaker --service-name my-chatbot
+    ml-platform destroy aws       --service-name my-chatbot
+    ml-platform destroy sagemaker --service-name my-chatbot
 """
 
 from __future__ import annotations
@@ -90,7 +92,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     deploy_p.add_argument(
         "target",
-        choices=["aws", "local"],
+        choices=["aws", "sagemaker", "local"],
         help="Deployment target.",
     )
     deploy_p.add_argument(
@@ -110,7 +112,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     destroy_p.add_argument(
         "target",
-        choices=["aws", "local"],
+        choices=["aws", "sagemaker", "local"],
         help="Deployment target.",
     )
     destroy_p.add_argument(
@@ -168,6 +170,15 @@ def main() -> None:
                 manifest_path=args.manifest,
             )
             sys.exit(0 if ok else 1)
+        elif args.target == "sagemaker":
+            from ml_platform.cli.deploy_sagemaker import run_deploy_sagemaker
+
+            ok = run_deploy_sagemaker(
+                service_name=args.service_name,
+                auto_approve=args.yes,
+                manifest_path=args.manifest,
+            )
+            sys.exit(0 if ok else 1)
         elif args.target == "local":
             print("Local deployment uses Docker Compose.")
             print("Run:  docker compose -f docker-compose.dev.yml up")
@@ -178,6 +189,16 @@ def main() -> None:
             from ml_platform.cli.destroy import run_destroy
 
             ok = run_destroy(
+                service_name=args.service_name,
+                region=args.region,
+                force=args.force,
+                verify_only=args.verify_only,
+            )
+            sys.exit(0 if ok else 1)
+        elif args.target == "sagemaker":
+            from ml_platform.cli.destroy_sagemaker import run_destroy_sagemaker
+
+            ok = run_destroy_sagemaker(
                 service_name=args.service_name,
                 region=args.region,
                 force=args.force,

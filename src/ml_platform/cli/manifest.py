@@ -19,6 +19,7 @@ from typing import Any, Literal
 import yaml  # type: ignore[import-untyped]
 
 ServiceType = Literal["llm", "agent", "stateful", "stateless"]
+DeployTarget = Literal["ecs", "sagemaker"]
 
 _COMPUTE_SIZES: dict[str, tuple[int, int]] = {
     "small": (256, 512),       # 0.25 vCPU, 0.5 GB
@@ -39,6 +40,37 @@ class ScalingConfig:
 
 
 @dataclass
+class SageMakerConfig:
+    """SageMaker endpoint configuration.
+
+    Attributes:
+        instance_type: ML instance type for the endpoint (e.g.
+            ``ml.m5.large``, ``ml.g5.xlarge`` for GPU).
+        initial_instance_count: Number of instances at launch.
+        serverless: Use SageMaker Serverless Inference (scale-to-zero).
+            When ``True``, ``instance_type`` and scaling settings are
+            ignored.
+        serverless_max_concurrency: Max concurrent invocations for
+            serverless endpoints.
+        serverless_memory_mb: Memory allocation for serverless
+            (1024, 2048, 3072, 4096, 5120, or 6144).
+        min_instances: Minimum instances for auto-scaling.
+        max_instances: Maximum instances for auto-scaling.
+        target_invocations_per_instance: Target-tracking metric for
+            auto-scaling.
+    """
+
+    instance_type: str = "ml.m5.large"
+    initial_instance_count: int = 1
+    serverless: bool = False
+    serverless_max_concurrency: int = 10
+    serverless_memory_mb: int = 2048
+    min_instances: int = 1
+    max_instances: int = 4
+    target_invocations_per_instance: int = 100
+
+
+@dataclass
 class FeaturesConfig:
     """Which optional platform features are enabled."""
 
@@ -55,17 +87,23 @@ class ProjectManifest:
     Attributes:
         service_name: Unique service identifier.
         service_type: One of ``llm``, ``agent``, ``stateful``, ``stateless``.
+        deploy_target: Deployment backend (``ecs`` or ``sagemaker``).
         features: Which platform features are enabled.
         compute_size: Task size (``small``, ``medium``, ``large``, ``xlarge``).
-        scaling: Auto-scaling configuration.
+            Used only for ECS deployments.
+        scaling: Auto-scaling configuration for ECS.
+        sagemaker: SageMaker-specific configuration.  Only read when
+            ``deploy_target`` is ``sagemaker``.
         region: AWS region for deployment.
     """
 
     service_name: str
     service_type: ServiceType = "llm"
+    deploy_target: DeployTarget = "ecs"
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     compute_size: str = "medium"
     scaling: ScalingConfig = field(default_factory=ScalingConfig)
+    sagemaker: SageMakerConfig = field(default_factory=SageMakerConfig)
     region: str = "us-east-1"
 
     @property
@@ -101,15 +139,18 @@ def load_manifest(path: Path | str = "ml-platform.yaml") -> ProjectManifest:
 
     features = FeaturesConfig(**raw.get("features", {}))
     scaling = ScalingConfig(**raw.get("scaling", {}))
+    sagemaker = SageMakerConfig(**raw.get("sagemaker", {}))
 
     return ProjectManifest(
         service_name=raw["service_name"],
         service_type=raw.get("type", raw.get("service_type", "llm")),
+        deploy_target=raw.get("deploy_target", "ecs"),
         features=features,
         compute_size=raw.get("compute", {}).get("size", "medium")
         if isinstance(raw.get("compute"), dict)
         else raw.get("compute_size", "medium"),
         scaling=scaling,
+        sagemaker=sagemaker,
         region=raw.get("region", "us-east-1"),
     )
 
@@ -124,11 +165,14 @@ def save_manifest(manifest: ProjectManifest, path: Path | str = "ml-platform.yam
     data: dict[str, Any] = {
         "service_name": manifest.service_name,
         "type": manifest.service_type,
+        "deploy_target": manifest.deploy_target,
         "region": manifest.region,
         "features": asdict(manifest.features),
         "compute": {"size": manifest.compute_size},
         "scaling": asdict(manifest.scaling),
     }
+    if manifest.deploy_target == "sagemaker":
+        data["sagemaker"] = asdict(manifest.sagemaker)
     Path(path).write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
 
 
