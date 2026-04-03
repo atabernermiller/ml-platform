@@ -235,6 +235,84 @@ ml-platform check --service-name svc                 # Verify AWS configuration
 | `rag` | Retrieval + single LLM | `LLMServiceBase` |
 | `bandit` | Online learning with feedback | `StatefulServiceBase` |
 
+## Service mesh integration
+
+ml-platform services are standard FastAPI/ASGI applications and can be placed behind a service mesh (Istio, Linkerd, AWS App Mesh, Consul Connect, etc.) with no application-code changes.
+
+### What works out of the box
+
+| Mesh concern | ml-platform support |
+|---|---|
+| **Liveness probes** | `GET /health/live` -- returns 200 while the process is alive |
+| **Readiness probes** | `GET /health/ready` -- returns 200 only when all critical `HealthCheck` components pass; 503 otherwise |
+| **Distributed tracing** | `RunContext` creates OpenTelemetry child spans for every LLM call and tool execution; the request middleware reads `X-Request-ID` / `X-Session-ID` headers for correlation |
+| **Metrics scraping** | `GET /metrics` exposes a JSON snapshot compatible with Prometheus-style pull or push gateways |
+| **Plain HTTP transport** | Every service is a standard ASGI app, so mesh sidecars (Envoy, Linkerd-proxy) proxy traffic transparently |
+
+### What you configure at the infrastructure layer
+
+- **Sidecar injection** -- mesh-specific (e.g., Istio `VirtualService` / `DestinationRule`, App Mesh CDK constructs, or Linkerd annotations on ECS / Kubernetes task definitions).
+- **mTLS** -- most meshes handle this transparently; no application-level TLS configuration is required.
+- **Service discovery** -- the mesh's built-in DNS or service registry replaces hard-coded endpoints; pass upstream URLs via `ServiceConfig` fields or environment variables.
+- **Retry / timeout policies** -- define at the mesh level to avoid duplicating logic in application code.
+
+### Example: Istio on Kubernetes
+
+```yaml
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: research-agent
+spec:
+  hosts:
+    - research-agent
+  http:
+    - route:
+        - destination:
+            host: research-agent
+            port:
+              number: 8000
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: research-agent
+spec:
+  host: research-agent
+  trafficPolicy:
+    connectionPool:
+      http:
+        h2UpgradePolicy: UPGRADE
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+```
+
+The Kubernetes `Deployment` only needs the standard Istio sidecar annotation and the health probe paths that ml-platform already exposes:
+
+```yaml
+spec:
+  template:
+    metadata:
+      labels:
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+        - name: research-agent
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+```
+
 ## Development
 
 ```bash
