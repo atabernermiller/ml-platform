@@ -22,6 +22,7 @@ All paths share:
 from ml_platform._version import __version__
 from ml_platform.alerting import AlertEvaluator, AlertRule
 from ml_platform.config import AgentConfig, LLMConfig, ServiceConfig, StatefulConfig
+from ml_platform.evaluation import EvaluationReporter, EvaluationResult, EvaluationStatus
 from ml_platform.health import HealthCheck, HealthRegistry
 from ml_platform.log import bind, configure_logging
 from ml_platform.scheduling import ScheduledTask, TaskRunner, scheduled
@@ -30,6 +31,9 @@ __all__ = [
     "AgentConfig",
     "AlertEvaluator",
     "AlertRule",
+    "EvaluationReporter",
+    "EvaluationResult",
+    "EvaluationStatus",
     "HealthCheck",
     "HealthRegistry",
     "LLMConfig",

@@ -49,6 +49,8 @@ nav:
           - MLflowTracker: api/tracking/mlflow.md
       - Infrastructure:
           - CDK Constructs: api/infra/constructs.md
+  - Guides:
+      - Evaluation & Drift Detection: guides/evaluation.md
 
 plugins:
   - search
