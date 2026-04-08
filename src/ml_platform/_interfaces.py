@@ -32,6 +32,8 @@ __all__ = [
     "QueueBackend",
     "Table",
     "FeatureGate",
+    "EventBus",
+    "UserPool",
 ]
 
 # ---------------------------------------------------------------------------
@@ -823,5 +825,143 @@ class FeatureGate(ABC):
 
         Returns:
             Mapping of flag names to boolean enabled states.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Event bus (pub/sub)
+# ---------------------------------------------------------------------------
+
+
+class EventBus(ABC):
+    """Interface for publishing and subscribing to events.
+
+    Implementations exist for AWS EventBridge and an in-memory bus for
+    local development.  Unlike :class:`QueueBackend` (point-to-point),
+    ``EventBus`` supports fan-out to multiple subscribers and
+    pattern-based routing.
+    """
+
+    @abstractmethod
+    def publish(
+        self,
+        source: str,
+        detail_type: str,
+        detail: dict[str, Any],
+    ) -> str:
+        """Publish an event.
+
+        Args:
+            source: Logical source of the event (e.g. ``"orders.service"``).
+            detail_type: Event type identifier (e.g. ``"OrderCreated"``).
+            detail: JSON-serialisable event payload.
+
+        Returns:
+            Event identifier.
+        """
+        ...
+
+    @abstractmethod
+    def publish_batch(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> list[str]:
+        """Publish multiple events in a single call.
+
+        Each entry must contain ``source``, ``detail_type``, and ``detail``
+        keys matching the :meth:`publish` signature.
+
+        Args:
+            entries: List of event dicts.
+
+        Returns:
+            List of event identifiers (one per entry).
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# User pool / identity management
+# ---------------------------------------------------------------------------
+
+
+class UserPool(ABC):
+    """Interface for user identity management (signup, password reset, MFA).
+
+    The primary implementation wraps AWS Cognito User Pools.  A stub
+    in-memory implementation is provided for local development.
+    """
+
+    @abstractmethod
+    def create_user(
+        self,
+        username: str,
+        *,
+        email: str = "",
+        phone: str = "",
+        attributes: dict[str, str] | None = None,
+        temporary_password: str = "",
+    ) -> dict[str, Any]:
+        """Create a new user in the pool.
+
+        Args:
+            username: Unique username.
+            email: User email address.
+            phone: User phone number (E.164 format).
+            attributes: Additional user attributes.
+            temporary_password: Optional temporary password. If empty,
+                the backend generates one.
+
+        Returns:
+            Dict with at least ``"username"`` and ``"status"`` keys.
+        """
+        ...
+
+    @abstractmethod
+    def get_user(self, username: str) -> dict[str, Any] | None:
+        """Retrieve a user's profile.
+
+        Args:
+            username: Username to look up.
+
+        Returns:
+            User profile dict, or ``None`` if not found.
+        """
+        ...
+
+    @abstractmethod
+    def delete_user(self, username: str) -> bool:
+        """Delete a user from the pool.
+
+        Args:
+            username: Username to delete.
+
+        Returns:
+            ``True`` if deleted, ``False`` if the user did not exist.
+        """
+        ...
+
+    @abstractmethod
+    def reset_password(self, username: str) -> bool:
+        """Initiate a password reset for a user.
+
+        Args:
+            username: Target username.
+
+        Returns:
+            ``True`` if the reset was initiated.
+        """
+        ...
+
+    @abstractmethod
+    def list_users(self, *, limit: int = 60) -> list[dict[str, Any]]:
+        """List users in the pool.
+
+        Args:
+            limit: Maximum number of users to return.
+
+        Returns:
+            List of user profile dicts.
         """
         ...

@@ -22,6 +22,9 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Any
 
 from ml_platform._interfaces import EmailBackend
@@ -32,7 +35,30 @@ __all__ = [
     "SESEmailBackend",
     "ConsoleEmailBackend",
     "render_template",
+    "Attachment",
 ]
+
+
+class Attachment:
+    """An email attachment.
+
+    Attributes:
+        filename: Name shown in the email client.
+        content: Raw file bytes.
+        content_type: MIME type (e.g. ``"application/pdf"``).
+    """
+
+    __slots__ = ("filename", "content", "content_type")
+
+    def __init__(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        self.filename = filename
+        self.content = content
+        self.content_type = content_type
 
 
 def render_template(template: str, variables: dict[str, str]) -> str:
@@ -117,6 +143,72 @@ class SESEmailBackend(EmailBackend):
         logger.info("Sent email to %s, message_id=%s", to, message_id)
         return message_id
 
+    def send_raw(
+        self,
+        *,
+        to: list[str],
+        subject: str,
+        body_text: str,
+        body_html: str = "",
+        from_addr: str = "",
+        reply_to: list[str] | None = None,
+        attachments: list[Attachment] | None = None,
+    ) -> str:
+        """Send an email with MIME attachments via ``SendRawEmail``.
+
+        Required for invoices, PDFs, or any binary attachment.
+
+        Required IAM permissions::
+
+            ses:SendRawEmail – on the verified identity/domain
+
+        Args:
+            to: Recipient addresses.
+            subject: Subject line.
+            body_text: Plain-text body.
+            body_html: Optional HTML body.
+            from_addr: Sender address (uses default if empty).
+            reply_to: Optional reply-to addresses.
+            attachments: List of :class:`Attachment` objects.
+
+        Returns:
+            SES message identifier.
+        """
+        sender = from_addr or self._default_sender
+        if not sender:
+            raise ValueError("No sender address: provide from_addr or set default_sender")
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = subject
+        msg["From"] = sender
+        msg["To"] = ", ".join(to)
+        if reply_to:
+            msg["Reply-To"] = ", ".join(reply_to)
+
+        body_part = MIMEMultipart("alternative")
+        body_part.attach(MIMEText(body_text, "plain", "utf-8"))
+        if body_html:
+            body_part.attach(MIMEText(body_html, "html", "utf-8"))
+        msg.attach(body_part)
+
+        for att in attachments or []:
+            part = MIMEApplication(att.content)
+            part.add_header(
+                "Content-Disposition", "attachment", filename=att.filename
+            )
+            if att.content_type:
+                part.set_type(att.content_type)
+            msg.attach(part)
+
+        response = self._ses.send_raw_email(
+            Source=sender,
+            Destinations=to,
+            RawMessage={"Data": msg.as_string()},
+        )
+        message_id: str = response["MessageId"]
+        logger.info("Sent raw email to %s, message_id=%s", to, message_id)
+        return message_id
+
 
 class ConsoleEmailBackend(EmailBackend):
     """Log-based email backend for local development.
@@ -157,5 +249,54 @@ class ConsoleEmailBackend(EmailBackend):
             to,
             subject,
             body_text,
+        )
+        return message_id
+
+    def send_raw(
+        self,
+        *,
+        to: list[str],
+        subject: str,
+        body_text: str,
+        body_html: str = "",
+        from_addr: str = "",
+        reply_to: list[str] | None = None,
+        attachments: list[Attachment] | None = None,
+    ) -> str:
+        """Log a raw email with attachments (local development).
+
+        Args:
+            to: Recipient addresses.
+            subject: Subject line.
+            body_text: Plain-text body.
+            body_html: Optional HTML body.
+            from_addr: Sender address.
+            reply_to: Optional reply-to addresses.
+            attachments: List of :class:`Attachment` objects.
+
+        Returns:
+            Console message identifier.
+        """
+        message_id = f"console-raw-{uuid.uuid4().hex[:12]}"
+        att_info = [
+            {"filename": a.filename, "size_bytes": len(a.content), "content_type": a.content_type}
+            for a in (attachments or [])
+        ]
+        record = {
+            "message_id": message_id,
+            "to": to,
+            "subject": subject,
+            "body_text": body_text,
+            "body_html": body_html,
+            "from_addr": from_addr,
+            "reply_to": reply_to or [],
+            "attachments": att_info,
+        }
+        self.sent_messages.append(record)
+        logger.info(
+            "Email (console raw): to=%s subject=%r attachments=%d",
+            to,
+            subject,
+            len(att_info),
         )
         return message_id
