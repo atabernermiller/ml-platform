@@ -15,6 +15,25 @@ from typing import Any, Protocol, runtime_checkable
 
 from ml_platform._types import Completion, Message
 
+# Re-export for convenience
+__all__ = [
+    "MetricsBackend",
+    "StateManager",
+    "ContextStore",
+    "ConversationStore",
+    "ExperimentTracker",
+    "LLMProvider",
+    "Tool",
+    "Profile",
+    "FileStore",
+    "EmailBackend",
+    "CDNBackend",
+    "SecretResolver",
+    "QueueBackend",
+    "Table",
+    "FeatureGate",
+]
+
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
@@ -388,4 +407,421 @@ class Profile(Protocol):
         self, table_name: str, region: str, ttl_s: int
     ) -> ConversationStore:
         """Create a conversation store for multi-turn sessions."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# File storage
+# ---------------------------------------------------------------------------
+
+
+class FileStore(ABC):
+    """Interface for general-purpose file storage.
+
+    Implementations exist for S3 (with optional CloudFront CDN) and
+    local filesystem.  Unlike :class:`StateManager`, which is scoped to
+    checkpoint directories, ``FileStore`` handles individual files with
+    content-type awareness, presigned URLs, and public URL generation.
+    """
+
+    @abstractmethod
+    def put(self, key: str, data: bytes, *, content_type: str = "application/octet-stream") -> str:
+        """Upload a file and return its storage key.
+
+        Args:
+            key: Logical path / key for the file.
+            data: Raw file bytes.
+            content_type: MIME type of the file.
+
+        Returns:
+            The canonical storage key.
+        """
+        ...
+
+    @abstractmethod
+    def get(self, key: str) -> bytes | None:
+        """Download a file by key.
+
+        Args:
+            key: Storage key returned by :meth:`put`.
+
+        Returns:
+            File contents, or ``None`` if the key does not exist.
+        """
+        ...
+
+    @abstractmethod
+    def delete(self, key: str) -> bool:
+        """Delete a file by key.
+
+        Args:
+            key: Storage key.
+
+        Returns:
+            ``True`` if the file was deleted, ``False`` if it did not exist.
+        """
+        ...
+
+    @abstractmethod
+    def presigned_upload_url(self, key: str, *, expires_in_s: int = 3600, content_type: str = "application/octet-stream") -> str:
+        """Generate a presigned URL for direct browser upload.
+
+        Args:
+            key: Destination key.
+            expires_in_s: URL expiry in seconds.
+            content_type: Expected content type.
+
+        Returns:
+            Presigned PUT URL.
+        """
+        ...
+
+    @abstractmethod
+    def presigned_download_url(self, key: str, *, expires_in_s: int = 3600) -> str:
+        """Generate a presigned URL for direct browser download.
+
+        Args:
+            key: File key.
+            expires_in_s: URL expiry in seconds.
+
+        Returns:
+            Presigned GET URL.
+        """
+        ...
+
+    @abstractmethod
+    def public_url(self, key: str) -> str:
+        """Return a public URL for the file.
+
+        Args:
+            key: File key.
+
+        Returns:
+            Publicly accessible URL (CDN or direct S3).
+        """
+        ...
+
+    @abstractmethod
+    def list_keys(self, prefix: str = "") -> list[str]:
+        """List all keys under the given prefix.
+
+        Args:
+            prefix: Key prefix to filter by.
+
+        Returns:
+            List of matching keys.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Email
+# ---------------------------------------------------------------------------
+
+
+class EmailBackend(ABC):
+    """Interface for transactional email delivery.
+
+    Implementations exist for AWS SES and a console/log mock for
+    local development.
+    """
+
+    @abstractmethod
+    def send(
+        self,
+        *,
+        to: list[str],
+        subject: str,
+        body_text: str,
+        body_html: str = "",
+        from_addr: str = "",
+        reply_to: list[str] | None = None,
+    ) -> str:
+        """Send a transactional email.
+
+        Args:
+            to: Recipient email addresses.
+            subject: Email subject line.
+            body_text: Plain-text body.
+            body_html: Optional HTML body.
+            from_addr: Sender address (uses default if empty).
+            reply_to: Optional reply-to addresses.
+
+        Returns:
+            Message identifier from the email backend.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# CDN
+# ---------------------------------------------------------------------------
+
+
+class CDNBackend(ABC):
+    """Interface for CDN operations (cache invalidation, signed URLs).
+
+    The primary implementation wraps AWS CloudFront.
+    """
+
+    @abstractmethod
+    def signed_url(self, path: str, *, expires_in_s: int = 3600) -> str:
+        """Generate a signed CDN URL for a resource.
+
+        Args:
+            path: Resource path relative to the distribution origin.
+            expires_in_s: URL expiry in seconds.
+
+        Returns:
+            Signed URL.
+        """
+        ...
+
+    @abstractmethod
+    def invalidate(self, paths: list[str]) -> str:
+        """Invalidate cached objects at the given paths.
+
+        Args:
+            paths: List of CDN paths to invalidate (e.g. ``["/images/*"]``).
+
+        Returns:
+            Invalidation ID from the CDN provider.
+        """
+        ...
+
+    @abstractmethod
+    def public_url(self, path: str) -> str:
+        """Return the public CDN URL for a path.
+
+        Args:
+            path: Resource path.
+
+        Returns:
+            Full CDN URL.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+
+
+class SecretResolver(ABC):
+    """Interface for loading secrets at startup.
+
+    Implementations exist for AWS Secrets Manager (with caching) and
+    environment variables (for local development).
+    """
+
+    @abstractmethod
+    def get(self, secret_id: str) -> str:
+        """Retrieve a secret value.
+
+        Args:
+            secret_id: Secret identifier (name or ARN).
+
+        Returns:
+            Secret string value.
+
+        Raises:
+            KeyError: If the secret does not exist.
+        """
+        ...
+
+    @abstractmethod
+    def get_json(self, secret_id: str) -> dict[str, Any]:
+        """Retrieve and parse a JSON secret.
+
+        Args:
+            secret_id: Secret identifier.
+
+        Returns:
+            Parsed JSON object.
+
+        Raises:
+            KeyError: If the secret does not exist.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Queue / event processing
+# ---------------------------------------------------------------------------
+
+
+class QueueBackend(ABC):
+    """Interface for consuming messages from a queue.
+
+    Implementations exist for AWS SQS and an in-memory queue for
+    local development.
+    """
+
+    @abstractmethod
+    def send(self, message: dict[str, Any], *, delay_s: int = 0) -> str:
+        """Send a message to the queue.
+
+        Args:
+            message: JSON-serialisable message body.
+            delay_s: Delivery delay in seconds.
+
+        Returns:
+            Message identifier.
+        """
+        ...
+
+    @abstractmethod
+    def receive(self, *, max_messages: int = 1, wait_time_s: int = 20) -> list[dict[str, Any]]:
+        """Receive messages from the queue.
+
+        Args:
+            max_messages: Maximum number of messages to receive (1-10).
+            wait_time_s: Long-poll wait time in seconds.
+
+        Returns:
+            List of message dicts with ``"body"`` and ``"receipt_handle"`` keys.
+        """
+        ...
+
+    @abstractmethod
+    def delete(self, receipt_handle: str) -> None:
+        """Delete a processed message from the queue.
+
+        Args:
+            receipt_handle: Receipt handle from a received message.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# General-purpose data table
+# ---------------------------------------------------------------------------
+
+
+class Table(ABC):
+    """Interface for general-purpose key-value data access.
+
+    Implementations exist for DynamoDB and an in-memory dict for
+    local development.  Unlike :class:`ContextStore` (consume-once)
+    or :class:`ConversationStore` (append-only), ``Table`` supports
+    standard CRUD with optional secondary key queries.
+    """
+
+    @abstractmethod
+    def put_item(self, item: dict[str, Any]) -> None:
+        """Insert or replace an item.
+
+        Args:
+            item: Item data; must contain the partition key field.
+        """
+        ...
+
+    @abstractmethod
+    def get_item(self, key: dict[str, Any]) -> dict[str, Any] | None:
+        """Retrieve an item by its key.
+
+        Args:
+            key: Key fields (partition key, and sort key if applicable).
+
+        Returns:
+            Item data, or ``None`` if not found.
+        """
+        ...
+
+    @abstractmethod
+    def delete_item(self, key: dict[str, Any]) -> bool:
+        """Delete an item by its key.
+
+        Args:
+            key: Key fields.
+
+        Returns:
+            ``True`` if deleted, ``False`` if the item did not exist.
+        """
+        ...
+
+    @abstractmethod
+    def query(
+        self,
+        partition_key: str,
+        partition_value: Any,
+        *,
+        sort_key_condition: tuple[str, str, Any] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query items by partition key with optional sort-key filtering.
+
+        Args:
+            partition_key: Name of the partition key attribute.
+            partition_value: Value to match.
+            sort_key_condition: Optional ``(attribute, operator, value)``
+                tuple, where operator is ``"eq"``, ``"begins_with"``,
+                ``"between"``, ``"lt"``, ``"lte"``, ``"gt"``, or ``"gte"``.
+            limit: Maximum number of items to return.
+
+        Returns:
+            List of matching items.
+        """
+        ...
+
+    @abstractmethod
+    def scan(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Scan all items in the table.
+
+        Args:
+            limit: Maximum number of items to return.
+
+        Returns:
+            List of items.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Feature flags / A/B testing
+# ---------------------------------------------------------------------------
+
+
+class FeatureGate(ABC):
+    """Interface for feature flags and gradual rollouts.
+
+    Implementations exist for DynamoDB-backed flags and a static
+    config-file backend for local development.
+    """
+
+    @abstractmethod
+    def is_enabled(self, flag: str, *, context: dict[str, Any] | None = None) -> bool:
+        """Check whether a feature flag is enabled.
+
+        Args:
+            flag: Flag identifier.
+            context: Optional context for targeting rules (e.g. user_id,
+                region, percentage bucket).
+
+        Returns:
+            ``True`` if the flag is enabled for the given context.
+        """
+        ...
+
+    @abstractmethod
+    def get_variant(self, flag: str, *, context: dict[str, Any] | None = None) -> str:
+        """Return the active variant for an A/B test flag.
+
+        Args:
+            flag: Flag identifier.
+            context: Optional targeting context.
+
+        Returns:
+            Variant name (e.g. ``"control"``, ``"treatment_a"``).
+            Returns ``"control"`` if the flag is not found.
+        """
+        ...
+
+    @abstractmethod
+    def all_flags(self) -> dict[str, bool]:
+        """Return all flags and their current enabled states.
+
+        Returns:
+            Mapping of flag names to boolean enabled states.
+        """
         ...

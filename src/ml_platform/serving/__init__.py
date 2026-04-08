@@ -11,6 +11,13 @@ from ml_platform.serving.conversation_store import (
     DynamoDBConversationStore,
     InMemoryConversationStore,
 )
+from ml_platform.serving.lambda_adapter import create_lambda_handler, wrap_for_lambda
+from ml_platform.serving.openapi_export import (
+    export_openapi_schema,
+    generate_typescript_client,
+    generate_typescript_types,
+)
+from ml_platform.serving.rate_limit import TokenBucketLimiter, add_rate_limit_middleware
 from ml_platform.serving.runtime import AgentRuntime, BaseRuntime, StatefulRuntime
 from ml_platform.serving.sagemaker import wrap_for_sagemaker
 from ml_platform.serving.schemas import FeedbackRequest, PredictRequest, PredictResponse
@@ -38,7 +45,14 @@ __all__ = [
     "S3StateManager",
     "StatefulRuntime",
     "StatefulServiceBase",
+    "TokenBucketLimiter",
+    "add_rate_limit_middleware",
     "create_agent_app",
+    "create_lambda_handler",
     "create_stateful_app",
+    "export_openapi_schema",
+    "generate_typescript_client",
+    "generate_typescript_types",
+    "wrap_for_lambda",
     "wrap_for_sagemaker",
 ]

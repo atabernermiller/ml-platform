@@ -38,18 +38,23 @@ infra = [
     "aws-cdk-lib>=2.130",
     "constructs>=10.0",
 ]
+auth = [
+    "PyJWT>=2.8",
+    "fastapi>=0.110",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
     "asgi-lifespan>=2.1",
-    "moto[cloudformation,dynamodb,ecr,ecs,elbv2,s3,sts]>=5.0",
+    "moto[cloudformation,dynamodb,ecr,ecs,elbv2,s3,ses,sqs,secretsmanager,sts]>=5.0",
     "httpx>=0.27",
     "ruff>=0.4",
     "mypy>=1.10",
+    "PyJWT>=2.8",
 ]
 all = [
-    "ml-platform[stateful,stateless,monitoring,tracking,infra,dev]",
+    "ml-platform[stateful,stateless,monitoring,tracking,infra,auth,dev]",
 ]
 
 [project.scripts]

@@ -17,6 +17,21 @@ All paths share:
 - Pluggable experiment tracking (``ExperimentTracker``)
 - Cloud profiles for zero-config backend selection
 - Built-in ``/dashboard`` route with live metrics
+
+Additional cross-cutting capabilities:
+
+- General-purpose file storage (``FileStore``)
+- Transactional email (``EmailBackend``)
+- CDN integration (``CDNBackend``)
+- Secret resolution (``SecretResolver``)
+- Queue / event processing (``QueueBackend``, ``QueueWorker``)
+- General DynamoDB data access (``Table``)
+- Feature flags and A/B testing (``FeatureGate``)
+- Authentication / authorization middleware
+- Rate limiting middleware
+- Lambda runtime adapter
+- CI/CD pipeline generation
+- Cloud profiles (``LocalProfile``, ``AWSProfile``)
 """
 
 from ml_platform._version import __version__
