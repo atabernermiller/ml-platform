@@ -504,11 +504,13 @@ class FileStore(ABC):
         ...
 
     @abstractmethod
-    def list_keys(self, prefix: str = "") -> list[str]:
-        """List all keys under the given prefix.
+    def list_keys(self, prefix: str = "", *, max_keys: int | None = None) -> list[str]:
+        """List keys under the given prefix.
 
         Args:
             prefix: Key prefix to filter by.
+            max_keys: Maximum number of keys to return.  ``None`` means
+                return all matching keys.
 
         Returns:
             List of matching keys.

@@ -124,8 +124,14 @@ class AgentRuntime(BaseRuntime):
                 InMemoryConversationStore,
             )
 
-            logger.info(
-                "DynamoDB unavailable for conversations; using in-memory store"
+            logger.critical(
+                "DEGRADED: DynamoDB unavailable for conversation table '%s'; "
+                "falling back to in-memory store. Conversations will NOT be "
+                "shared across replicas and will be LOST on restart. "
+                "Remove conversation_table_name from config to silence this, "
+                "or fix DynamoDB connectivity.",
+                agent_cfg.conversation_table_name,
+                exc_info=True,
             )
             return InMemoryConversationStore()
 

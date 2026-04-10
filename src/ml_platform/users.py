@@ -108,8 +108,8 @@ class CognitoUserPool(UserPool):
         except self._client.exceptions.UserNotFoundException:
             return None
         except Exception:
-            logger.debug("User not found: %s", username)
-            return None
+            logger.exception("Failed to get user: %s", username)
+            raise
 
         return {
             "username": response["Username"],
@@ -132,8 +132,8 @@ class CognitoUserPool(UserPool):
         except self._client.exceptions.UserNotFoundException:
             return False
         except Exception:
-            logger.debug("Failed to delete user: %s", username)
-            return False
+            logger.exception("Failed to delete user: %s", username)
+            raise
 
     def reset_password(self, username: str) -> bool:
         try:

@@ -72,9 +72,36 @@ class CloudFrontCDN(CDNBackend):
     def signed_url(self, path: str, *, expires_in_s: int = 3600) -> str:
         """Return a time-limited public URL.
 
-        This implementation appends an expiry query parameter.  For
-        true CloudFront signed URLs, integrate with a CloudFront key
-        pair and use ``botocore.signers.CloudFrontSigner``.
+        .. warning::
+
+            This appends a plaintext ``expires`` query parameter — it is
+            **not** cryptographically signed.  For access-controlled
+            content, use ``botocore.signers.CloudFrontSigner`` with a
+            CloudFront key pair, or ``S3FileStore.presigned_download_url``.
+        """
+        import warnings
+
+        warnings.warn(
+            "CloudFrontCDN.signed_url() appends a plaintext expiry parameter, "
+            "not a cryptographic signature. Use expiring_url() to silence this "
+            "warning, or use botocore.signers.CloudFrontSigner for real signing.",
+            stacklevel=2,
+        )
+        return self.expiring_url(path, expires_in_s=expires_in_s)
+
+    def expiring_url(self, path: str, *, expires_in_s: int = 3600) -> str:
+        """Return a URL with a plaintext expiry query parameter.
+
+        This does **not** provide cryptographic access control.  It is
+        useful for cache-busting or short-lived links where the origin
+        enforces access separately.
+
+        Args:
+            path: Resource path.
+            expires_in_s: Seconds until the URL is considered expired.
+
+        Returns:
+            URL with ``?expires=<unix_timestamp>`` appended.
         """
         expiry = int(time.time()) + expires_in_s
         clean_path = path if path.startswith("/") else f"/{path}"

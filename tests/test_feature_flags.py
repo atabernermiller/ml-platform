@@ -85,12 +85,12 @@ class TestDynamoDBFeatureGate:
         table.put_item(Item={"flag_name": "gradual", "enabled": True, "percentage": 50})
 
         enabled_count = 0
-        total = 100
+        total = 1000
         for i in range(total):
             if gate.is_enabled("gradual", context={"user_id": f"user-{i}"}):
                 enabled_count += 1
 
-        assert 20 < enabled_count < 80
+        assert 350 < enabled_count < 650
 
     def test_get_variant(self) -> None:
         gate = self._create_gate()

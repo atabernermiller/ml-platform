@@ -124,9 +124,19 @@ class APIKeyAuth:
         self._query_param = query_param
 
     def authenticate(self, request: Request) -> AuthResult:
-        key = request.headers.get(self._header_name) or request.query_params.get(
-            self._query_param, ""
-        )
+        key = request.headers.get(self._header_name, "")
+        if not key:
+            key = request.query_params.get(self._query_param, "")
+            if key:
+                import warnings
+
+                warnings.warn(
+                    "API key passed via query parameter. Query parameters may "
+                    "appear in access logs, browser history, and referrer "
+                    "headers. Prefer the header-based approach.",
+                    UserWarning,
+                    stacklevel=2,
+                )
         if key and key in self._valid_keys:
             return AuthResult(authenticated=True, identity=f"apikey:{_hash_key(key)}")
         return AuthResult(authenticated=False)

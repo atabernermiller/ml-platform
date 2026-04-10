@@ -40,7 +40,7 @@ def generate_stack_template(
     Returns:
         CloudFormation template as a dict.
     """
-    manifest._alert_rules = alert_rules or []  # type: ignore[attr-defined]
+    _alert_rules = alert_rules or []
     svc = manifest.service_name
     resources: dict[str, Any] = {}
     outputs: dict[str, Any] = {}
@@ -110,7 +110,7 @@ def generate_stack_template(
     resources["Dashboard"] = _cloudwatch_dashboard(manifest)
 
     # -- CloudWatch alarms from alert rules ---------------------------------
-    alarm_resources = _cloudwatch_alarms(manifest)
+    alarm_resources = _cloudwatch_alarms(svc, _alert_rules)
     resources.update(alarm_resources)
 
     # -- Outputs -------------------------------------------------------------
@@ -183,7 +183,7 @@ def _ecs_task_role(svc: str, manifest: ProjectManifest) -> dict[str, Any]:
         {
             "Effect": "Allow",
             "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-            "Resource": "*",
+            "Resource": {"Fn::Sub": f"arn:aws:logs:${{AWS::Region}}:${{AWS::AccountId}}:log-group:/ecs/{svc}:*"},
         },
     ]
     if manifest.features.checkpointing:
@@ -438,16 +438,18 @@ def _auto_scaling(manifest: ProjectManifest) -> dict[str, dict[str, Any]]:
     }
 
 
-def _dynamodb_table(table_name: str, ttl_attr: str = "ttl") -> dict[str, Any]:
+def _dynamodb_table(
+    table_name: str, pk_name: str = "request_id", ttl_attr: str = "ttl"
+) -> dict[str, Any]:
     return {
         "Type": "AWS::DynamoDB::Table",
         "Properties": {
             "TableName": table_name,
             "BillingMode": "PAY_PER_REQUEST",
             "AttributeDefinitions": [
-                {"AttributeName": "pk", "AttributeType": "S"}
+                {"AttributeName": pk_name, "AttributeType": "S"}
             ],
-            "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+            "KeySchema": [{"AttributeName": pk_name, "KeyType": "HASH"}],
             "TimeToLiveSpecification": {
                 "AttributeName": ttl_attr,
                 "Enabled": True,
@@ -495,13 +497,13 @@ _CONDITION_TO_CW: dict[str, str] = {
 }
 
 
-def _cloudwatch_alarms(manifest: ProjectManifest) -> dict[str, dict[str, Any]]:
-    """Generate CloudWatch Alarm resources from alert rules on the manifest."""
-    rules: list[Any] = getattr(manifest, "_alert_rules", [])
+def _cloudwatch_alarms(
+    svc: str, rules: list[Any]
+) -> dict[str, dict[str, Any]]:
+    """Generate CloudWatch Alarm resources from alert rules."""
     if not rules:
         return {}
 
-    svc = manifest.service_name
     ns = "MLPlatform"
     resources: dict[str, dict[str, Any]] = {}
 

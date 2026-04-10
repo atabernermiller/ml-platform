@@ -30,7 +30,7 @@ _DASHBOARD_TEMPLATE = """\
   <meta charset="utf-8" />
   <title>{service_name} – Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" integrity="sha384-UUpbbMKPd3IjhDSEMBMPmVVMz8KQnWOMvdM4EXBcOG/FlnmpbNjr8TZ2mLFNccUb" crossorigin="anonymous"></script>
   <style>
     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
     body {{ font-family: system-ui, -apple-system, sans-serif;
@@ -67,6 +67,7 @@ _DASHBOARD_TEMPLATE = """\
         el.style.display = "block";
       }}
     }}
+    function esc(s) {{ const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }}
     function render(d) {{
       const p = document.getElementById("panels");
       p.innerHTML = "";
@@ -74,9 +75,14 @@ _DASHBOARD_TEMPLATE = """\
         const card = document.createElement("div");
         card.className = "card";
         const fmt = typeof v === "number" ? v.toLocaleString(undefined,
-          {{maximumFractionDigits: 4}}) : v;
-        card.innerHTML = `<h2>${{k.replace(/_/g, " ")}}</h2>
-          <div class="metric">${{fmt}}</div>`;
+          {{maximumFractionDigits: 4}}) : String(v);
+        const h2 = document.createElement("h2");
+        h2.textContent = k.replace(/_/g, " ");
+        const metric = document.createElement("div");
+        metric.className = "metric";
+        metric.textContent = fmt;
+        card.appendChild(h2);
+        card.appendChild(metric);
         p.appendChild(card);
       }}
     }}

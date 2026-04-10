@@ -61,8 +61,12 @@ class AWSSecretResolver(SecretResolver):
 
         try:
             response = self._client.get_secret_value(SecretId=secret_id)
-        except Exception as exc:
+        except self._client.exceptions.ResourceNotFoundException as exc:
             raise KeyError(f"Secret not found: {secret_id}") from exc
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to retrieve secret '{secret_id}': {type(exc).__name__}: {exc}"
+            ) from exc
 
         value: str = response["SecretString"]
         if self._cache_ttl_s > 0:

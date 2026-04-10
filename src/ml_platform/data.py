@@ -227,7 +227,8 @@ class DynamoDBTable(Table):
 class InMemoryTable(Table):
     """In-memory table for local development and testing.
 
-    Supports partition key queries and optional sort key conditions.
+    Uses a dict index for O(1) get/put/delete by key, with a separate
+    ordered list to preserve insertion order for scan/query.
 
     Args:
         partition_key: Name of the partition key attribute.
@@ -237,27 +238,34 @@ class InMemoryTable(Table):
     def __init__(self, partition_key: str, sort_key: str = "") -> None:
         self._partition_key = partition_key
         self._sort_key = sort_key
-        self._items: list[dict[str, Any]] = []
+        self._index: dict[tuple[Any, ...], dict[str, Any]] = {}
+
+    def _key_tuple(self, key: dict[str, Any]) -> tuple[Any, ...]:
+        pk = key[self._partition_key]
+        if self._sort_key and self._sort_key in key:
+            return (pk, key[self._sort_key])
+        return (pk,)
+
+    def _make_key(self, item: dict[str, Any]) -> tuple[Any, ...]:
+        pk = item[self._partition_key]
+        if self._sort_key and self._sort_key in item:
+            return (pk, item[self._sort_key])
+        return (pk,)
 
     def put_item(self, item: dict[str, Any]) -> None:
-        key_match = self._find_index(self._make_key(item))
-        if key_match is not None:
-            self._items[key_match] = copy.deepcopy(item)
-        else:
-            self._items.append(copy.deepcopy(item))
+        kt = self._make_key(item)
+        self._index[kt] = copy.deepcopy(item)
 
     def get_item(self, key: dict[str, Any]) -> dict[str, Any] | None:
-        idx = self._find_index(key)
-        if idx is not None:
-            return copy.deepcopy(self._items[idx])
+        kt = self._key_tuple(key)
+        item = self._index.get(kt)
+        if item is not None:
+            return copy.deepcopy(item)
         return None
 
     def delete_item(self, key: dict[str, Any]) -> bool:
-        idx = self._find_index(key)
-        if idx is not None:
-            self._items.pop(idx)
-            return True
-        return False
+        kt = self._key_tuple(key)
+        return self._index.pop(kt, None) is not None
 
     def query(
         self,
@@ -268,7 +276,7 @@ class InMemoryTable(Table):
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        for item in self._items:
+        for item in self._index.values():
             if item.get(partition_key) != partition_value:
                 continue
             if sort_key_condition:
@@ -282,10 +290,10 @@ class InMemoryTable(Table):
         return results
 
     def scan(self, *, limit: int | None = None) -> list[dict[str, Any]]:
-        items = [copy.deepcopy(i) for i in self._items]
+        items = list(self._index.values())
         if limit is not None:
             items = items[:limit]
-        return items
+        return [copy.deepcopy(i) for i in items]
 
     def batch_put_items(self, items: list[dict[str, Any]]) -> int:
         """Write multiple items. Delegates to :meth:`put_item` in a loop.
@@ -330,18 +338,6 @@ class InMemoryTable(Table):
             if self.delete_item(key):
                 deleted += 1
         return deleted
-
-    def _make_key(self, item: dict[str, Any]) -> dict[str, Any]:
-        key = {self._partition_key: item[self._partition_key]}
-        if self._sort_key and self._sort_key in item:
-            key[self._sort_key] = item[self._sort_key]
-        return key
-
-    def _find_index(self, key: dict[str, Any]) -> int | None:
-        for i, item in enumerate(self._items):
-            if all(item.get(k) == v for k, v in key.items()):
-                return i
-        return None
 
 
 def _check_condition(value: Any, op: str, target: Any) -> bool:

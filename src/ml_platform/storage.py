@@ -104,9 +104,11 @@ class S3FileStore(FileStore):
             return response["Body"].read()
         except self._s3.exceptions.NoSuchKey:
             return None
-        except Exception:
-            logger.debug("Key not found: s3://%s/%s", self._bucket, full_key)
-            return None
+        except Exception as exc:
+            if "NoSuchKey" in str(type(exc).__name__) or "404" in str(exc):
+                logger.debug("Key not found: s3://%s/%s", self._bucket, full_key)
+                return None
+            raise
 
     def delete(self, key: str) -> bool:
         full_key = self._full_key(key)
@@ -150,7 +152,9 @@ class S3FileStore(FileStore):
             return f"https://{self._cloudfront_domain}/{full_key}"
         return f"https://{self._bucket}.s3.{self._region}.amazonaws.com/{full_key}"
 
-    def list_keys(self, prefix: str = "") -> list[str]:
+    def list_keys(
+        self, prefix: str = "", *, max_keys: int | None = None
+    ) -> list[str]:
         search_prefix = self._full_key(prefix) if prefix else (self._prefix + "/" if self._prefix else "")
         keys: list[str] = []
         continuation_token: str | None = None
@@ -159,11 +163,15 @@ class S3FileStore(FileStore):
                 "Bucket": self._bucket,
                 "Prefix": search_prefix,
             }
+            if max_keys is not None:
+                kwargs["MaxKeys"] = min(1000, max_keys - len(keys))
             if continuation_token:
                 kwargs["ContinuationToken"] = continuation_token
             response = self._s3.list_objects_v2(**kwargs)
             for obj in response.get("Contents", []):
                 keys.append(obj["Key"])
+                if max_keys is not None and len(keys) >= max_keys:
+                    return keys
             if not response.get("IsTruncated"):
                 break
             continuation_token = response.get("NextContinuationToken")
@@ -232,7 +240,9 @@ class LocalFileStore(FileStore):
             return f"{self._base_url}/{key.lstrip('/')}"
         return self._path(key).as_uri()
 
-    def list_keys(self, prefix: str = "") -> list[str]:
+    def list_keys(
+        self, prefix: str = "", *, max_keys: int | None = None
+    ) -> list[str]:
         search_dir = self._base_dir / prefix if prefix else self._base_dir
         if not search_dir.exists():
             return []
@@ -240,4 +250,6 @@ class LocalFileStore(FileStore):
         for path in sorted(search_dir.rglob("*")):
             if path.is_file():
                 keys.append(str(path.relative_to(self._base_dir)))
+                if max_keys is not None and len(keys) >= max_keys:
+                    break
         return keys

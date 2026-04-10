@@ -106,6 +106,32 @@ class TestGenerateStackTemplate:
         serialized = json.dumps(t)
         assert json.loads(serialized) == t
 
+    def test_context_table_uses_request_id_pk(
+        self, stateful_manifest: ProjectManifest
+    ) -> None:
+        t = generate_stack_template(stateful_manifest, ecr_image_uri="img:latest")
+        ctx_table = t["Resources"]["ContextTable"]
+        key_schema = ctx_table["Properties"]["KeySchema"]
+        assert key_schema[0]["AttributeName"] == "request_id"
+
+    def test_conversation_table_uses_session_id_pk(
+        self, llm_manifest: ProjectManifest
+    ) -> None:
+        t = generate_stack_template(llm_manifest, ecr_image_uri="img:latest")
+        conv_table = t["Resources"]["ConversationTable"]
+        key_schema = conv_table["Properties"]["KeySchema"]
+        assert key_schema[0]["AttributeName"] == "session_id"
+
+    def test_logs_iam_scoped_to_log_group(
+        self, llm_manifest: ProjectManifest
+    ) -> None:
+        t = generate_stack_template(llm_manifest, ecr_image_uri="img:latest")
+        role = t["Resources"]["TaskRole"]
+        statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+        logs_stmt = [s for s in statements if "logs:PutLogEvents" in s["Action"]]
+        assert len(logs_stmt) == 1
+        assert logs_stmt[0]["Resource"] != "*"
+
     def test_vpc_and_subnets_injected(self, llm_manifest: ProjectManifest) -> None:
         t = generate_stack_template(
             llm_manifest, ecr_image_uri="img:latest",

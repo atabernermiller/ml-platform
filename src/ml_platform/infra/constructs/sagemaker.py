@@ -77,11 +77,6 @@ class SageMakerEndpointConstruct(Construct):
             self,
             "ExecutionRole",
             assumed_by=iam.ServicePrincipal("sagemaker.amazonaws.com"),
-            managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "AmazonSageMakerFullAccess"
-                ),
-            ],
         )
 
         s3_bucket_arn = self._extract_bucket_arn(model_data_url)
@@ -89,6 +84,34 @@ class SageMakerEndpointConstruct(Construct):
             iam.PolicyStatement(
                 actions=["s3:GetObject", "s3:ListBucket"],
                 resources=[s3_bucket_arn, f"{s3_bucket_arn}/*"],
+            )
+        )
+        execution_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                ],
+                resources=["*"],
+            )
+        )
+        execution_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["ecr:GetAuthorizationToken"],
+                resources=["*"],
+            )
+        )
+        execution_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "cloudwatch:PutMetricData",
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                    "logs:DescribeLogStreams",
+                ],
+                resources=["*"],
             )
         )
 

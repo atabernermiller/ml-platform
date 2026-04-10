@@ -222,6 +222,6 @@ class FileStoreEventEmitter:
         """Delegate to the underlying store (no event emitted)."""
         return self._store.get(key)
 
-    def list_keys(self, prefix: str = "") -> list[str]:
+    def list_keys(self, prefix: str = "", *, max_keys: int | None = None) -> list[str]:
         """Delegate to the underlying store (no event emitted)."""
-        return self._store.list_keys(prefix)
+        return self._store.list_keys(prefix, max_keys=max_keys)

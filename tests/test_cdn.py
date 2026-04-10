@@ -31,11 +31,22 @@ class TestCloudFrontCDN:
         cdn = CloudFrontCDN(domain="d123.cloudfront.net")
         assert cdn.public_url("/img/photo.jpg") == "https://d123.cloudfront.net/img/photo.jpg"
 
-    def test_signed_url_has_expiry(self) -> None:
+    def test_expiring_url_has_expiry(self) -> None:
         cdn = CloudFrontCDN(domain="d123.cloudfront.net")
-        url = cdn.signed_url("/file.pdf", expires_in_s=3600)
+        url = cdn.expiring_url("/file.pdf", expires_in_s=3600)
         assert "expires=" in url
         assert url.startswith("https://d123.cloudfront.net/file.pdf")
+
+    def test_signed_url_emits_deprecation_warning(self) -> None:
+        import warnings
+
+        cdn = CloudFrontCDN(domain="d123.cloudfront.net")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            url = cdn.signed_url("/file.pdf", expires_in_s=3600)
+            assert len(w) == 1
+            assert "plaintext" in str(w[0].message).lower()
+        assert "expires=" in url
 
     def test_invalidate_without_distribution_id(self) -> None:
         cdn = CloudFrontCDN(domain="d123.cloudfront.net")

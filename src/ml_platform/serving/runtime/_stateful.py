@@ -208,9 +208,13 @@ class StatefulRuntime(BaseRuntime):
         except Exception:
             from ml_platform.serving.context_store import InMemoryContextStore
 
-            logger.info(
-                "DynamoDB unavailable for table %s; using in-memory context store",
+            logger.critical(
+                "DEGRADED: DynamoDB unavailable for table '%s'; falling back to "
+                "in-memory context store. Context will NOT be shared across "
+                "replicas and will be LOST on restart. Set state_table_name='' "
+                "to silence this warning, or fix DynamoDB connectivity.",
                 table_name,
+                exc_info=True,
             )
             return InMemoryContextStore()
 

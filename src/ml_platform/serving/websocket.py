@@ -55,6 +55,7 @@ class WebSocketManager:
         self._connections: dict[str, WebSocket] = {}
         self._rooms: dict[str, set[str]] = {}
         self._handlers: list[MessageHandler] = []
+        self._lock = asyncio.Lock()
 
     @property
     def connection_count(self) -> int:
@@ -91,9 +92,10 @@ class WebSocketManager:
         """
         await websocket.accept()
         client_id = uuid.uuid4().hex[:12]
-        self._connections[client_id] = websocket
-        if room:
-            self._rooms.setdefault(room, set()).add(client_id)
+        async with self._lock:
+            self._connections[client_id] = websocket
+            if room:
+                self._rooms.setdefault(room, set()).add(client_id)
         logger.debug("WS connected: %s (room=%s)", client_id, room or "<none>")
         return client_id
 
@@ -103,12 +105,13 @@ class WebSocketManager:
         Args:
             client_id: Client identifier from :meth:`connect`.
         """
-        self._connections.pop(client_id, None)
-        for members in self._rooms.values():
-            members.discard(client_id)
-        empty_rooms = [r for r, m in self._rooms.items() if not m]
-        for r in empty_rooms:
-            del self._rooms[r]
+        async with self._lock:
+            self._connections.pop(client_id, None)
+            for members in self._rooms.values():
+                members.discard(client_id)
+            empty_rooms = [r for r, m in self._rooms.items() if not m]
+            for r in empty_rooms:
+                del self._rooms[r]
         logger.debug("WS disconnected: %s", client_id)
 
     async def send(self, client_id: str, data: dict[str, Any]) -> bool:
@@ -186,8 +189,9 @@ class WebSocketManager:
             client_id: Client identifier.
             room: Room name.
         """
-        if client_id in self._connections:
-            self._rooms.setdefault(room, set()).add(client_id)
+        async with self._lock:
+            if client_id in self._connections:
+                self._rooms.setdefault(room, set()).add(client_id)
 
     async def leave_room(self, client_id: str, room: str) -> None:
         """Remove a client from a room.
@@ -196,11 +200,12 @@ class WebSocketManager:
             client_id: Client identifier.
             room: Room name.
         """
-        members = self._rooms.get(room)
-        if members:
-            members.discard(client_id)
-            if not members:
-                del self._rooms[room]
+        async with self._lock:
+            members = self._rooms.get(room)
+            if members:
+                members.discard(client_id)
+                if not members:
+                    del self._rooms[room]
 
     async def _handle_messages(
         self, client_id: str, websocket: WebSocket

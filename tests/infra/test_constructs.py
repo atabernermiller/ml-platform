@@ -19,7 +19,9 @@ from aws_cdk.assertions import Match, Template
 from ml_platform.infra.constructs.cdn import CDNConstruct
 from ml_platform.infra.constructs.ecs_service import EcsServiceConstruct
 from ml_platform.infra.constructs.lambda_function import LambdaServiceConstruct
+from ml_platform.infra.constructs.multi_region import MultiRegionConstruct
 from ml_platform.infra.constructs.network import NetworkConstruct
+from ml_platform.infra.constructs.sagemaker import SageMakerEndpointConstruct
 from ml_platform.infra.constructs.secrets import SecretsConstruct
 
 
@@ -413,3 +415,98 @@ class TestSecretsConstruct:
                 }),
             }),
         )
+
+
+# ---------------------------------------------------------------------------
+# MultiRegionConstruct
+# ---------------------------------------------------------------------------
+
+
+class TestMultiRegionConstruct:
+    def test_creates_health_check(self) -> None:
+        app = App()
+        stack = Stack(app, "MRStack")
+        MultiRegionConstruct(
+            stack, "MR",
+            service_name="test-svc",
+            primary_endpoint="primary.example.com",
+            secondary_endpoint="secondary.example.com",
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::Route53::HealthCheck", 1)
+
+    def test_failover_records_created_with_zone(self) -> None:
+        app = App()
+        stack = Stack(app, "MRZoneStack")
+        MultiRegionConstruct(
+            stack, "MR",
+            service_name="zone-svc",
+            primary_endpoint="primary.example.com",
+            secondary_endpoint="secondary.example.com",
+            domain_name="api.example.com",
+            hosted_zone_id="Z12345",
+            hosted_zone_name="example.com",
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::Route53::RecordSet", 2)
+
+    def test_no_records_without_zone(self) -> None:
+        app = App()
+        stack = Stack(app, "MRNoZoneStack")
+        MultiRegionConstruct(
+            stack, "MR",
+            service_name="nozone-svc",
+            primary_endpoint="primary.example.com",
+            secondary_endpoint="secondary.example.com",
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::Route53::RecordSet", 0)
+
+    def test_exposes_health_check_id(self) -> None:
+        app = App()
+        stack = Stack(app, "MRPropStack")
+        mr = MultiRegionConstruct(
+            stack, "MR",
+            service_name="prop-svc",
+            primary_endpoint="primary.example.com",
+            secondary_endpoint="secondary.example.com",
+        )
+        assert mr.health_check_id is not None
+
+
+# ---------------------------------------------------------------------------
+# SageMakerEndpointConstruct (IAM scoping)
+# ---------------------------------------------------------------------------
+
+
+class TestSageMakerEndpointConstruct:
+    def test_no_full_access_policy(self) -> None:
+        """Verify AmazonSageMakerFullAccess is NOT attached."""
+        app = App()
+        stack = Stack(app, "SMStack")
+        SageMakerEndpointConstruct(
+            stack, "Ep",
+            endpoint_name="test-ep",
+            model_data_url="s3://my-bucket/model.tar.gz",
+            image_uri="123456789012.dkr.ecr.us-east-1.amazonaws.com/my-img:latest",
+        )
+        template = Template.from_stack(stack)
+        tpl_json = template.to_json()
+        import json as _json
+        tpl_str = _json.dumps(tpl_json)
+        assert "AmazonSageMakerFullAccess" not in tpl_str
+
+    def test_creates_sagemaker_endpoint(self) -> None:
+        app = App()
+        stack = Stack(app, "SMEpStack")
+        ep = SageMakerEndpointConstruct(
+            stack, "Ep",
+            endpoint_name="my-ep",
+            model_data_url="s3://bucket/model.tar.gz",
+            image_uri="123.dkr.ecr.us-east-1.amazonaws.com/img:1",
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::SageMaker::Model", 1)
+        template.resource_count_is("AWS::SageMaker::EndpointConfig", 1)
+        template.resource_count_is("AWS::SageMaker::Endpoint", 1)
+        assert ep.endpoint_name == "my-ep"

@@ -24,10 +24,10 @@ class TestTokenBucketLimiter:
         assert limiter.allow() is False
 
     def test_refills_over_time(self) -> None:
-        limiter = TokenBucketLimiter(rate=100.0, burst=1)
+        limiter = TokenBucketLimiter(rate=1000.0, burst=1)
         assert limiter.allow() is True
         assert limiter.allow() is False
-        time.sleep(0.02)
+        time.sleep(0.05)
         assert limiter.allow() is True
 
     def test_available_tokens(self) -> None:

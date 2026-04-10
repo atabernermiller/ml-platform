@@ -254,7 +254,7 @@ def _write_docker_compose(base: Path, name: str) -> None:
         "      - ML_PLATFORM_SERVICE_NAME=" + name + "\n"
         "\n"
         "  prometheus:\n"
-        "    image: prom/prometheus:latest\n"
+        "    image: prom/prometheus:v2.53.0\n"
         "    ports:\n"
         '      - "9090:9090"\n'
         "    volumes:\n"
@@ -262,13 +262,13 @@ def _write_docker_compose(base: Path, name: str) -> None:
         "    profiles: [observability]\n"
         "\n"
         "  grafana:\n"
-        "    image: grafana/grafana:latest\n"
+        "    image: grafana/grafana:11.1.0\n"
         "    ports:\n"
         '      - "3000:3000"\n'
         "    profiles: [observability]\n"
         "\n"
         "  jaeger:\n"
-        "    image: jaegertracing/all-in-one:latest\n"
+        "    image: jaegertracing/all-in-one:1.58\n"
         "    ports:\n"
         '      - "16686:16686"\n'
         "    profiles: [observability]\n"

@@ -246,27 +246,35 @@ class ServiceConfig:
         return cls(**env_map)  # type: ignore[arg-type]
 
 
+_INT_PATTERNS = {"int", "int | None", "None | int", "Optional[int]"}
+_FLOAT_PATTERNS = {"float", "float | None", "None | float", "Optional[float]"}
+_BOOL_PATTERNS = {"bool", "bool | None", "None | bool", "Optional[bool]"}
+
+
 def _coerce(type_hint: str, raw: str) -> object:
     """Best-effort coercion from env-var string to the declared type.
 
-    Handles plain types (``int``, ``float``, ``bool``, ``str``) as well
-    as ``Literal[...]`` and ``Optional[T]`` / ``T | None`` patterns that
-    appear in type-hint string representations.
+    Uses exact pattern matching on the stringified type hint to avoid
+    false positives from substring checks (e.g. a type containing
+    ``"int"`` in its name).
     """
     hint = type_hint.strip()
 
-    if "int" in hint and "Literal" not in hint:
+    if hint in _BOOL_PATTERNS:
+        return raw.lower() in ("1", "true", "yes")
+
+    base = hint.replace("Optional[", "").replace("]", "").replace(" | None", "").replace("None | ", "").strip()
+
+    if base == "int":
         try:
             return int(raw)
         except ValueError:
             return raw
-    if "float" in hint:
+    if base == "float":
         try:
             return float(raw)
         except ValueError:
             return raw
-    if hint == "bool":
-        return raw.lower() in ("1", "true", "yes")
     return raw
 
 

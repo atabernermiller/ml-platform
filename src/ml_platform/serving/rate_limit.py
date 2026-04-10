@@ -83,9 +83,11 @@ class _PerKeyLimiter:
 
     def allow(self, key: str) -> bool:
         with self._lock:
-            if key not in self._limiters:
-                self._limiters[key] = TokenBucketLimiter(self._rate, self._burst)
-        return self._limiters[key].allow()
+            limiter = self._limiters.get(key)
+            if limiter is None:
+                limiter = TokenBucketLimiter(self._rate, self._burst)
+                self._limiters[key] = limiter
+        return limiter.allow()
 
 
 class _RateLimitMiddleware(BaseHTTPMiddleware):
