@@ -18,10 +18,13 @@ import collections
 import json
 import logging
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from ml_platform._interfaces import ConversationStore
 from ml_platform._types import Message
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import Table as DynamoDBTable_
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +78,7 @@ class DynamoDBConversationStore(ConversationStore):
         self._ttl_s = ttl_s
         self._tokenizer = tokenizer or _default_token_estimate
         dynamodb = boto3.resource("dynamodb", region_name=region)
-        self._table = dynamodb.Table(table_name)
+        self._table: DynamoDBTable_ = dynamodb.Table(table_name)
 
     def append(self, session_id: str, message: Message) -> None:
         """Append a message using ``time.time_ns()`` as the sort key."""

@@ -7,9 +7,15 @@ Exit code 0 if all checks pass, 1 if any fail.
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform.config import ServiceConfig
+
+if TYPE_CHECKING:
+    from mypy_boto3_cloudwatch.client import CloudWatchClient
+    from mypy_boto3_dynamodb.client import DynamoDBClient
+    from mypy_boto3_s3.client import S3Client
+    from mypy_boto3_sts.client import STSClient
 
 _PASS = "\033[32m✓\033[0m"
 _FAIL = "\033[31m✗\033[0m"
@@ -27,7 +33,7 @@ def _check_credentials(region: str) -> tuple[bool, str]:
     try:
         import boto3
 
-        sts = boto3.client("sts", region_name=region)
+        sts: STSClient = boto3.client("sts", region_name=region)
         identity = sts.get_caller_identity()
         account = identity["Account"]
         arn = identity["Arn"]
@@ -41,7 +47,7 @@ def _check_s3_bucket(bucket: str, prefix: str, region: str) -> tuple[bool, str]:
     try:
         import boto3
 
-        s3 = boto3.client("s3", region_name=region)
+        s3: S3Client = boto3.client("s3", region_name=region)
         s3.head_bucket(Bucket=bucket)
 
         response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1)
@@ -63,7 +69,7 @@ def _check_s3_write(bucket: str, region: str) -> tuple[bool, str]:
     try:
         import boto3
 
-        s3 = boto3.client("s3", region_name=region)
+        s3: S3Client = boto3.client("s3", region_name=region)
         test_key = ".ml-platform-check"
         s3.put_object(Bucket=bucket, Key=test_key, Body=b"")
         s3.delete_object(Bucket=bucket, Key=test_key)
@@ -77,7 +83,7 @@ def _check_dynamodb_table(table_name: str, region: str) -> tuple[bool, str]:
     try:
         import boto3
 
-        dynamodb = boto3.client("dynamodb", region_name=region)
+        dynamodb: DynamoDBClient = boto3.client("dynamodb", region_name=region)
         desc = dynamodb.describe_table(TableName=table_name)
         table = desc["Table"]
 
@@ -106,7 +112,7 @@ def _check_cloudwatch_put(region: str) -> tuple[bool, str]:
     try:
         import boto3
 
-        cw = boto3.client("cloudwatch", region_name=region)
+        cw: CloudWatchClient = boto3.client("cloudwatch", region_name=region)
         cw.put_metric_data(
             Namespace="MLPlatform",
             MetricData=[

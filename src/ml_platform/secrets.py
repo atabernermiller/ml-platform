@@ -19,9 +19,12 @@ import json
 import logging
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import SecretResolver
+
+if TYPE_CHECKING:
+    from mypy_boto3_secretsmanager.client import SecretsManagerClient
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +53,7 @@ class AWSSecretResolver(SecretResolver):
     def __init__(self, region: str = "us-east-1", cache_ttl_s: int = 300) -> None:
         import boto3
 
-        self._client: Any = boto3.client("secretsmanager", region_name=region)
+        self._client: SecretsManagerClient = boto3.client("secretsmanager", region_name=region)
         self._cache_ttl_s = cache_ttl_s
         self._cache: dict[str, tuple[str, float]] = {}
 

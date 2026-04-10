@@ -8,8 +8,14 @@ should be attached to the service's execution role.
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from ml_platform.config import ServiceConfig
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.client import DynamoDBClient
+    from mypy_boto3_s3.client import S3Client
+    from mypy_boto3_sts.client import STSClient
 
 _PASS = "\033[32m✓\033[0m"
 _FAIL = "\033[31m✗\033[0m"
@@ -32,7 +38,7 @@ def _ensure_s3_bucket(bucket: str, region: str, dry_run: bool) -> bool:
     import boto3
     from botocore.exceptions import ClientError
 
-    s3 = boto3.client("s3", region_name=region)
+    s3: S3Client = boto3.client("s3", region_name=region)
 
     try:
         s3.head_bucket(Bucket=bucket)
@@ -78,7 +84,7 @@ def _ensure_dynamodb_table(table_name: str, region: str, dry_run: bool) -> bool:
     import boto3
     from botocore.exceptions import ClientError
 
-    dynamodb = boto3.client("dynamodb", region_name=region)
+    dynamodb: DynamoDBClient = boto3.client("dynamodb", region_name=region)
 
     try:
         dynamodb.describe_table(TableName=table_name)
@@ -193,7 +199,7 @@ def run_bootstrap(config: ServiceConfig, *, dry_run: bool = False) -> bool:
     try:
         import boto3
 
-        sts = boto3.client("sts", region_name=config.aws_region)
+        sts: STSClient = boto3.client("sts", region_name=config.aws_region)
         identity = sts.get_caller_identity()
         _print(_PASS, f"Authenticated as {identity['Arn']}")
     except Exception as exc:

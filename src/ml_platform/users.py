@@ -23,9 +23,12 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import UserPool
+
+if TYPE_CHECKING:
+    from mypy_boto3_cognito_idp.client import CognitoIdentityProviderClient
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,9 @@ class CognitoUserPool(UserPool):
         import boto3
 
         self._pool_id = user_pool_id
-        self._client: Any = boto3.client("cognito-idp", region_name=region)
+        self._client: CognitoIdentityProviderClient = boto3.client(
+            "cognito-idp", region_name=region
+        )
 
     def create_user(
         self,

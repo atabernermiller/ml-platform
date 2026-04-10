@@ -25,9 +25,12 @@ import uuid
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import EmailBackend
+
+if TYPE_CHECKING:
+    from mypy_boto3_ses.client import SESClient
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +108,7 @@ class SESEmailBackend(EmailBackend):
         self._region = region
         self._default_sender = default_sender
         self._configuration_set = configuration_set
-        self._ses: Any = boto3.client("ses", region_name=region)
+        self._ses: SESClient = boto3.client("ses", region_name=region)
 
     def send(
         self,

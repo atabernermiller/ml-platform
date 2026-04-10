@@ -53,6 +53,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "PyJWT>=2.8",
+    "boto3-stubs[s3,dynamodb,cloudwatch,cloudformation,ecr,sts,events,sagemaker,sagemaker-runtime,application-autoscaling,iam,secretsmanager,sqs,cloudfront,cognito-idp,ses]>=1.34",
 ]
 all = [
     "ml-platform[stateful,stateless,monitoring,tracking,infra,auth,dev]",

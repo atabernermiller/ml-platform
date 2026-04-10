@@ -17,9 +17,12 @@ import collections
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import ContextStore
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import Table as DynamoDBTable_
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,7 @@ class DynamoDBContextStore(ContextStore):
         self._table_name = table_name
         self._ttl_s = ttl_s
         dynamodb = boto3.resource("dynamodb", region_name=region)
-        self._table = dynamodb.Table(table_name)
+        self._table: DynamoDBTable_ = dynamodb.Table(table_name)
 
     def put(self, request_id: str, context: dict[str, Any]) -> None:
         """Store context with TTL."""

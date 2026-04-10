@@ -22,9 +22,12 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import Table
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import Table as DynamoDBTable_
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +70,7 @@ class DynamoDBTable(Table):
         self._partition_key = partition_key
         self._sort_key = sort_key
         dynamodb = boto3.resource("dynamodb", region_name=region)
-        self._table: Any = dynamodb.Table(table_name)
+        self._table: DynamoDBTable_ = dynamodb.Table(table_name)
 
     def put_item(self, item: dict[str, Any]) -> None:
         self._table.put_item(Item=item)

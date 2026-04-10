@@ -10,7 +10,13 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mypy_boto3_application_autoscaling.client import ApplicationAutoScalingClient
+    from mypy_boto3_ecr.client import ECRClient
+    from mypy_boto3_iam.client import IAMClient
+    from mypy_boto3_sagemaker.client import SageMakerClient
 
 _RESOURCE_DIR = ".ml-platform"
 
@@ -47,7 +53,7 @@ def _print_inventory(res: dict[str, Any]) -> None:
 def _delete_endpoint(res: dict[str, Any]) -> bool:
     import boto3
 
-    sm = boto3.client("sagemaker", region_name=res["region"])
+    sm: SageMakerClient = boto3.client("sagemaker", region_name=res["region"])
 
     try:
         sm.delete_endpoint(EndpointName=res["endpoint_name"])
@@ -72,7 +78,7 @@ def _delete_endpoint(res: dict[str, Any]) -> bool:
 def _delete_endpoint_config(res: dict[str, Any]) -> bool:
     import boto3
 
-    sm = boto3.client("sagemaker", region_name=res["region"])
+    sm: SageMakerClient = boto3.client("sagemaker", region_name=res["region"])
     try:
         sm.delete_endpoint_config(EndpointConfigName=res["config_name"])
         print(f"  ✓  EndpointConfig deleted: {res['config_name']}")
@@ -88,7 +94,7 @@ def _delete_endpoint_config(res: dict[str, Any]) -> bool:
 def _delete_model(res: dict[str, Any]) -> bool:
     import boto3
 
-    sm = boto3.client("sagemaker", region_name=res["region"])
+    sm: SageMakerClient = boto3.client("sagemaker", region_name=res["region"])
     try:
         sm.delete_model(ModelName=res["model_name"])
         print(f"  ✓  Model deleted: {res['model_name']}")
@@ -104,7 +110,7 @@ def _delete_model(res: dict[str, Any]) -> bool:
 def _delete_iam_role(res: dict[str, Any]) -> bool:
     import boto3
 
-    iam = boto3.client("iam", region_name=res["region"])
+    iam: IAMClient = boto3.client("iam", region_name=res["region"])
     role_name = res["role_name"]
 
     try:
@@ -130,7 +136,7 @@ def _delete_iam_role(res: dict[str, Any]) -> bool:
 def _delete_ecr_repository(res: dict[str, Any]) -> bool:
     import boto3
 
-    ecr = boto3.client("ecr", region_name=res["region"])
+    ecr: ECRClient = boto3.client("ecr", region_name=res["region"])
     repo = res["ecr_repository"]
     try:
         ecr.delete_repository(repositoryName=repo, force=True)
@@ -152,7 +158,7 @@ def _remove_auto_scaling(res: dict[str, Any]) -> None:
         return
 
     try:
-        aas = boto3.client("application-autoscaling", region_name=res["region"])
+        aas: ApplicationAutoScalingClient = boto3.client("application-autoscaling", region_name=res["region"])
         resource_id = f"endpoint/{res['endpoint_name']}/variant/primary"
         aas.deregister_scalable_target(
             ServiceNamespace="sagemaker",
@@ -194,7 +200,7 @@ def run_destroy_sagemaker(
         print("  --verify-only: checking that resources are deleted...")
         import boto3
 
-        sm = boto3.client("sagemaker", region_name=res["region"])
+        sm: SageMakerClient = boto3.client("sagemaker", region_name=res["region"])
         try:
             sm.describe_endpoint(EndpointName=res["endpoint_name"])
             print(f"  ✗  Endpoint still exists: {res['endpoint_name']}")

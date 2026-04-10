@@ -26,9 +26,12 @@ import logging
 import queue
 import threading
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import QueueBackend
+
+if TYPE_CHECKING:
+    from mypy_boto3_sqs.client import SQSClient
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +62,7 @@ class SQSQueueBackend(QueueBackend):
         import boto3
 
         self._queue_url = queue_url
-        self._sqs: Any = boto3.client("sqs", region_name=region)
+        self._sqs: SQSClient = boto3.client("sqs", region_name=region)
 
     def send(self, message: dict[str, Any], *, delay_s: int = 0) -> str:
         response = self._sqs.send_message(

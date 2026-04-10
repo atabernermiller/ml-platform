@@ -16,7 +16,10 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mypy_boto3_cloudwatch.client import CloudWatchClient
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +59,9 @@ class MetricsEmitter:
         self._service_name = service_name
         self._region = region
         self._namespace = namespace
-        self._cw_client: Any | None = None
+        self._cw_client: CloudWatchClient | None = None
 
-    def _get_cw_client(self) -> Any:
+    def _get_cw_client(self) -> CloudWatchClient:
         if self._cw_client is None:
             import boto3
 

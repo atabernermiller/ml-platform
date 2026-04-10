@@ -11,7 +11,14 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mypy_boto3_cloudformation.client import CloudFormationClient
+    from mypy_boto3_cloudwatch.client import CloudWatchClient
+    from mypy_boto3_dynamodb.client import DynamoDBClient
+    from mypy_boto3_ecr.client import ECRClient
+    from mypy_boto3_s3.client import S3Client
 
 _RESOURCE_DIR = ".ml-platform"
 
@@ -137,7 +144,7 @@ def _delete_cloudformation_stack(
     """Delete a CloudFormation stack and wait for completion."""
     import boto3
 
-    cfn = boto3.client("cloudformation", region_name=region)
+    cfn: CloudFormationClient = boto3.client("cloudformation", region_name=region)
     try:
         cfn.delete_stack(StackName=stack_name)
         waiter = cfn.get_waiter("stack_delete_complete")
@@ -150,7 +157,7 @@ def _delete_cloudformation_stack(
 def _delete_ecr_repository(repo_name: str, region: str) -> tuple[bool, str]:
     import boto3
 
-    ecr = boto3.client("ecr", region_name=region)
+    ecr: ECRClient = boto3.client("ecr", region_name=region)
     try:
         ecr.delete_repository(repositoryName=repo_name, force=True)
         return True, ""
@@ -179,7 +186,7 @@ def _delete_s3_bucket(bucket_name: str, region: str) -> tuple[bool, str]:
 def _delete_dynamodb_table(table_name: str, region: str) -> tuple[bool, str]:
     import boto3
 
-    ddb = boto3.client("dynamodb", region_name=region)
+    ddb: DynamoDBClient = boto3.client("dynamodb", region_name=region)
     try:
         ddb.delete_table(TableName=table_name)
         waiter = ddb.get_waiter("table_not_exists")
@@ -196,7 +203,7 @@ def _delete_cloudwatch_dashboard(
 ) -> tuple[bool, str]:
     import boto3
 
-    cw = boto3.client("cloudwatch", region_name=region)
+    cw: CloudWatchClient = boto3.client("cloudwatch", region_name=region)
     try:
         cw.delete_dashboards(DashboardNames=[dashboard_name])
         return True, ""
@@ -216,7 +223,7 @@ def _verify_cleanup(plan: TeardownPlan) -> list[ResourceEntry]:
     survivors: list[ResourceEntry] = []
     region = plan.region
 
-    cfn = boto3.client("cloudformation", region_name=region)
+    cfn: CloudFormationClient = boto3.client("cloudformation", region_name=region)
     try:
         resp = cfn.describe_stacks(StackName=plan.stack_name)
         status = resp["Stacks"][0]["StackStatus"]
@@ -228,7 +235,7 @@ def _verify_cleanup(plan: TeardownPlan) -> list[ResourceEntry]:
     except cfn.exceptions.ClientError:
         pass
 
-    ecr = boto3.client("ecr", region_name=region)
+    ecr: ECRClient = boto3.client("ecr", region_name=region)
     try:
         ecr.describe_repositories(repositoryNames=[plan.ecr_repository])
         survivors.append(ResourceEntry(
@@ -240,7 +247,7 @@ def _verify_cleanup(plan: TeardownPlan) -> list[ResourceEntry]:
         pass
 
     if plan.s3_bucket:
-        s3 = boto3.client("s3", region_name=region)
+        s3: S3Client = boto3.client("s3", region_name=region)
         try:
             s3.head_bucket(Bucket=plan.s3_bucket)
             survivors.append(ResourceEntry(
@@ -249,7 +256,7 @@ def _verify_cleanup(plan: TeardownPlan) -> list[ResourceEntry]:
         except Exception:
             pass
 
-    ddb = boto3.client("dynamodb", region_name=region)
+    ddb: DynamoDBClient = boto3.client("dynamodb", region_name=region)
     for t in plan.dynamo_tables:
         try:
             ddb.describe_table(TableName=t)

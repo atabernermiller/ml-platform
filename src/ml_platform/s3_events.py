@@ -24,9 +24,12 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import EventBus, FileStore
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3.client import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ class S3NotificationManager:
         import boto3
 
         self._bucket = bucket
-        self._s3: Any = boto3.client("s3", region_name=region)
+        self._s3: S3Client = boto3.client("s3", region_name=region)
 
     def get_configuration(self) -> dict[str, Any]:
         """Return the current notification configuration for the bucket.

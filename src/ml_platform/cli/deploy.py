@@ -13,7 +13,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mypy_boto3_cloudformation.client import CloudFormationClient
+    from mypy_boto3_ecr.client import ECRClient
+    from mypy_boto3_sts.client import STSClient
 
 from ml_platform.cli.manifest import (
     ProjectManifest,
@@ -267,7 +272,7 @@ def _docker_build_and_push(
     repo_name = svc
     image_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{repo_name}:latest"
 
-    ecr = boto3.client("ecr", region_name=region)
+    ecr: ECRClient = boto3.client("ecr", region_name=region)
 
     try:
         ecr.create_repository(repositoryName=repo_name)
@@ -328,7 +333,7 @@ def _deploy_cloudformation(
 
     from ml_platform.cli.cfn.template import generate_stack_template, stack_name
 
-    cfn = boto3.client("cloudformation", region_name=manifest.region)
+    cfn: CloudFormationClient = boto3.client("cloudformation", region_name=manifest.region)
     name = stack_name(manifest)
     template = generate_stack_template(manifest, ecr_image_uri=ecr_image_uri)
     template_body = json.dumps(template)
@@ -463,7 +468,7 @@ def run_deploy(
     import boto3
 
     try:
-        sts = boto3.client("sts", region_name=manifest.region)
+        sts: STSClient = boto3.client("sts", region_name=manifest.region)
         identity = sts.get_caller_identity()
         account_id = identity["Account"]
         arn = identity["Arn"]

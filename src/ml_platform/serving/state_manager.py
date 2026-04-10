@@ -12,6 +12,10 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3.client import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +54,7 @@ class S3StateManager:
 
         self._bucket = bucket
         self._prefix = prefix.rstrip("/") + "/"
-        self._s3 = boto3.client("s3", region_name=region)
+        self._s3: S3Client = boto3.client("s3", region_name=region)
 
     def upload(self, local_dir: str) -> str:
         """Upload a local checkpoint directory to S3.

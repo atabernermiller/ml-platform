@@ -27,9 +27,12 @@ import json
 import logging
 import uuid
 from collections import defaultdict
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from ml_platform._interfaces import EventBus
+
+if TYPE_CHECKING:
+    from mypy_boto3_events.client import EventBridgeClient
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +67,7 @@ class EventBridgeBus(EventBus):
         import boto3
 
         self._bus_name = bus_name
-        self._client: Any = boto3.client("events", region_name=region)
+        self._client: EventBridgeClient = boto3.client("events", region_name=region)
 
     def publish(
         self,

@@ -15,7 +15,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mypy_boto3_application_autoscaling.client import ApplicationAutoScalingClient
+    from mypy_boto3_ecr.client import ECRClient
+    from mypy_boto3_iam.client import IAMClient
+    from mypy_boto3_sagemaker.client import SageMakerClient
+    from mypy_boto3_sts.client import STSClient
 
 from ml_platform.cli.manifest import (
     ProjectManifest,
@@ -197,7 +204,7 @@ def _docker_build_and_push(
     repo_name = f"{manifest.service_name}-sagemaker"
     image_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{repo_name}:latest"
 
-    ecr = boto3.client("ecr", region_name=region)
+    ecr: ECRClient = boto3.client("ecr", region_name=region)
 
     try:
         ecr.create_repository(repositoryName=repo_name)
@@ -247,7 +254,7 @@ def _ensure_sagemaker_role(
     """Create or retrieve the IAM role for the SageMaker endpoint."""
     import boto3
 
-    iam = boto3.client("iam", region_name=region)
+    iam: IAMClient = boto3.client("iam", region_name=region)
     role_name = f"{svc}-sagemaker-role"
 
     trust_policy = json.dumps({
@@ -350,7 +357,7 @@ def _create_endpoint(
     """Create SageMaker Model, EndpointConfig, and Endpoint."""
     import boto3
 
-    sm_client = boto3.client("sagemaker", region_name=manifest.region)
+    sm_client: SageMakerClient = boto3.client("sagemaker", region_name=manifest.region)
     svc = manifest.service_name
     sm_cfg = manifest.sagemaker
 
@@ -439,7 +446,7 @@ def _setup_auto_scaling(manifest: ProjectManifest, endpoint_name: str) -> None:
     if sm_cfg.serverless or sm_cfg.min_instances == sm_cfg.max_instances:
         return
 
-    aas = boto3.client("application-autoscaling", region_name=manifest.region)
+    aas: ApplicationAutoScalingClient = boto3.client("application-autoscaling", region_name=manifest.region)
     resource_id = f"endpoint/{endpoint_name}/variant/primary"
 
     aas.register_scalable_target(
@@ -556,7 +563,7 @@ def run_deploy_sagemaker(
     import boto3
 
     try:
-        sts = boto3.client("sts", region_name=manifest.region)
+        sts: STSClient = boto3.client("sts", region_name=manifest.region)
         identity = sts.get_caller_identity()
         account_id = identity["Account"]
         print(f"  ✓  Authenticated as {identity['Arn']}")

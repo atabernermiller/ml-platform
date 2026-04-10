@@ -20,9 +20,12 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import CDNBackend
+
+if TYPE_CHECKING:
+    from mypy_boto3_cloudfront.client import CloudFrontClient
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +64,9 @@ class CloudFrontCDN(CDNBackend):
         self._domain = domain.rstrip("/")
         self._distribution_id = distribution_id
         self._region = region
-        self._cf_client: Any | None = None
+        self._cf_client: CloudFrontClient | None = None
 
-    def _get_client(self) -> Any:
+    def _get_client(self) -> CloudFrontClient:
         if self._cf_client is None:
             import boto3
             self._cf_client = boto3.client("cloudfront", region_name=self._region)

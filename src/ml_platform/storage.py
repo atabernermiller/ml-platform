@@ -26,10 +26,13 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from typing import Any
 
 from ml_platform._interfaces import FileStore
+
+if TYPE_CHECKING:
+    from mypy_boto3_s3.client import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +76,7 @@ class S3FileStore(FileStore):
         self._prefix = prefix.strip("/")
         self._region = region
         self._cloudfront_domain = cloudfront_domain.rstrip("/")
-        self._s3: Any = boto3.client("s3", region_name=region)
+        self._s3: S3Client = boto3.client("s3", region_name=region)
 
     def _full_key(self, key: str) -> str:
         if self._prefix:

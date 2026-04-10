@@ -22,9 +22,12 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import FeatureGate
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import Table as DynamoDBTable_
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +121,7 @@ class DynamoDBFeatureGate(FeatureGate):
         import boto3
 
         dynamodb = boto3.resource("dynamodb", region_name=region)
-        self._table: Any = dynamodb.Table(table_name)
+        self._table: DynamoDBTable_ = dynamodb.Table(table_name)
         self._cache_ttl_s = cache_ttl_s
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}
 
