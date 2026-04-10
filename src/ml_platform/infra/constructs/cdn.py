@@ -80,7 +80,7 @@ class CDNConstruct(Construct):
             self,
             "Distribution",
             default_behavior=cf.BehaviorOptions(
-                origin=origins.S3BucketV2Origin(bucket),
+                origin=origins.S3BucketOrigin.with_origin_access_control(bucket),
                 viewer_protocol_policy=cf.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cache_policy,
                 allowed_methods=cf.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,

@@ -12,6 +12,7 @@ Usage::
         service_name="inference-api",
         code_path="./src",
         handler="app.handler",
+        secrets={"DB_PASSWORD": "arn:aws:secretsmanager:us-east-1:123:secret:db-pw"},
     )
     print(fn.function_url)
 """
@@ -21,8 +22,8 @@ from __future__ import annotations
 from aws_cdk import (
     CfnOutput,
     Duration,
+    aws_iam as iam,
     aws_lambda as lambda_,
-    aws_apigatewayv2 as apigwv2,
 )
 from constructs import Construct
 
@@ -39,7 +40,12 @@ class LambdaServiceConstruct(Construct):
         runtime: Lambda runtime.
         memory_size: Memory allocation in MB.
         timeout: Function timeout.
-        environment: Environment variables.
+        environment: Plaintext environment variables.
+        secrets: Mapping of environment variable names to Secrets Manager
+            secret ARNs.  The construct injects each secret ARN as an env
+            var and grants the function ``secretsmanager:GetSecretValue``
+            on those ARNs so the runtime can resolve them via
+            :class:`~ml_platform.secrets.AWSSecretResolver`.
         create_function_url: Create a Lambda Function URL.
     """
 
@@ -55,9 +61,16 @@ class LambdaServiceConstruct(Construct):
         memory_size: int = 512,
         timeout: Duration = Duration.seconds(30),
         environment: dict[str, str] | None = None,
+        secrets: dict[str, str] | None = None,
         create_function_url: bool = True,
     ) -> None:
         super().__init__(scope, construct_id)
+
+        merged_env = dict(environment or {})
+        secret_arns: list[str] = []
+        for env_name, secret_arn in (secrets or {}).items():
+            merged_env[env_name] = secret_arn
+            secret_arns.append(secret_arn)
 
         fn = lambda_.Function(
             self,
@@ -68,9 +81,17 @@ class LambdaServiceConstruct(Construct):
             code=lambda_.Code.from_asset(code_path),
             memory_size=memory_size,
             timeout=timeout,
-            environment=environment or {},
+            environment=merged_env,
         )
         self._function = fn
+
+        if secret_arns:
+            fn.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["secretsmanager:GetSecretValue"],
+                    resources=secret_arns,
+                )
+            )
 
         self._function_url = ""
         if create_function_url:
