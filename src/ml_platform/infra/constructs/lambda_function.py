@@ -1,9 +1,11 @@
 """Lambda function construct for ml-platform services.
 
-Provisions a Lambda function with API Gateway v2 (HTTP API) integration,
-suitable for event-driven workloads and lightweight inference endpoints.
+Provisions a Lambda function with optional API Gateway v2 (HTTP API)
+integration and/or S3 event-notification triggers, suitable for
+event-driven workloads, lightweight inference endpoints, and
+upload-triggers-processing pipelines.
 
-Usage::
+Usage — HTTP endpoint::
 
     from ml_platform.infra.constructs import LambdaServiceConstruct
 
@@ -15,21 +17,46 @@ Usage::
         secrets={"DB_PASSWORD": "arn:aws:secretsmanager:us-east-1:123:secret:db-pw"},
     )
     print(fn.function_url)
+
+Usage — S3 event trigger::
+
+    from aws_cdk import aws_s3 as s3
+    from ml_platform.infra.constructs import LambdaServiceConstruct
+
+    uploads = s3.Bucket(self, "Uploads")
+
+    processor = LambdaServiceConstruct(
+        self, "ImageProcessor",
+        service_name="image-processor",
+        code_path="./processor",
+        handler="app.handler",
+        s3_trigger=LambdaServiceConstruct.S3Trigger(
+            bucket=uploads,
+            prefix="uploads/",
+            suffix=".jpg",
+            events=[s3.EventType.OBJECT_CREATED],
+        ),
+        create_function_url=False,
+    )
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 from aws_cdk import (
     CfnOutput,
     Duration,
     aws_iam as iam,
     aws_lambda as lambda_,
+    aws_s3 as s3,
+    aws_s3_notifications as s3n,
 )
 from constructs import Construct
 
 
 class LambdaServiceConstruct(Construct):
-    """Lambda function with optional HTTP API (API Gateway v2).
+    """Lambda function with optional HTTP endpoint and S3 event trigger.
 
     Args:
         scope: CDK construct scope.
@@ -47,7 +74,30 @@ class LambdaServiceConstruct(Construct):
             on those ARNs so the runtime can resolve them via
             :class:`~ml_platform.secrets.AWSSecretResolver`.
         create_function_url: Create a Lambda Function URL.
+        s3_trigger: Optional :class:`S3Trigger` that wires an S3 bucket
+            to invoke this function on object events.  The construct
+            grants ``s3:GetObject`` on the bucket and injects
+            ``S3_TRIGGER_BUCKET`` into the function environment.
     """
+
+    @dataclass(frozen=True)
+    class S3Trigger:
+        """Configuration for an S3 event notification trigger.
+
+        Attributes:
+            bucket: The S3 bucket to watch.
+            prefix: Key prefix filter (e.g. ``"uploads/"``).
+            suffix: Key suffix filter (e.g. ``".jpg"``).
+            events: S3 event types that fire the notification.  Defaults
+                to ``[s3.EventType.OBJECT_CREATED]``.
+        """
+
+        bucket: s3.IBucket
+        prefix: str = ""
+        suffix: str = ""
+        events: list[s3.EventType] = field(
+            default_factory=lambda: [s3.EventType.OBJECT_CREATED]
+        )
 
     def __init__(
         self,
@@ -63,6 +113,7 @@ class LambdaServiceConstruct(Construct):
         environment: dict[str, str] | None = None,
         secrets: dict[str, str] | None = None,
         create_function_url: bool = True,
+        s3_trigger: S3Trigger | None = None,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -71,6 +122,9 @@ class LambdaServiceConstruct(Construct):
         for env_name, secret_arn in (secrets or {}).items():
             merged_env[env_name] = secret_arn
             secret_arns.append(secret_arn)
+
+        if s3_trigger is not None:
+            merged_env["S3_TRIGGER_BUCKET"] = s3_trigger.bucket.bucket_name
 
         fn = lambda_.Function(
             self,
@@ -92,6 +146,26 @@ class LambdaServiceConstruct(Construct):
                     resources=secret_arns,
                 )
             )
+
+        if s3_trigger is not None:
+            s3_trigger.bucket.grant_read(fn)
+
+            has_filter = bool(s3_trigger.prefix or s3_trigger.suffix)
+            filter_args: list[s3.NotificationKeyFilter] = []
+            if has_filter:
+                filter_args.append(
+                    s3.NotificationKeyFilter(
+                        prefix=s3_trigger.prefix or None,
+                        suffix=s3_trigger.suffix or None,
+                    )
+                )
+
+            for event_type in s3_trigger.events:
+                s3_trigger.bucket.add_event_notification(
+                    event_type,
+                    s3n.LambdaDestination(fn),
+                    *filter_args,
+                )
 
         self._function_url = ""
         if create_function_url:

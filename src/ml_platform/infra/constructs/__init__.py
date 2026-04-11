@@ -9,6 +9,7 @@ Import and compose these in your project's CDK app::
         MLflowConstruct,
         MonitoringConstruct,
         CDNConstruct,
+        CognitoConstruct,
         LambdaServiceConstruct,
         MultiRegionConstruct,
         SecretsConstruct,
@@ -16,6 +17,7 @@ Import and compose these in your project's CDK app::
 """
 
 from ml_platform.infra.constructs.cdn import CDNConstruct
+from ml_platform.infra.constructs.cognito import CognitoConstruct
 from ml_platform.infra.constructs.ecs_service import EcsServiceConstruct
 from ml_platform.infra.constructs.lambda_function import LambdaServiceConstruct
 from ml_platform.infra.constructs.mlflow import MLflowConstruct
@@ -27,6 +29,7 @@ from ml_platform.infra.constructs.secrets import SecretsConstruct
 
 __all__ = [
     "CDNConstruct",
+    "CognitoConstruct",
     "EcsServiceConstruct",
     "LambdaServiceConstruct",
     "MLflowConstruct",

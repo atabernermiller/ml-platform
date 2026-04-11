@@ -13,10 +13,11 @@ import tempfile
 from typing import Any
 
 import pytest
-from aws_cdk import App, Duration, Stack, aws_ec2 as ec2, aws_ecs as ecs, aws_s3 as s3
-from aws_cdk.assertions import Match, Template
+from aws_cdk import App, Duration, Stack, aws_ec2 as ec2, aws_ecs as ecs, aws_s3 as s3, aws_iam as iam_cdk
+from aws_cdk.assertions import Capture, Match, Template
 
 from ml_platform.infra.constructs.cdn import CDNConstruct
+from ml_platform.infra.constructs.cognito import CognitoConstruct
 from ml_platform.infra.constructs.ecs_service import EcsServiceConstruct
 from ml_platform.infra.constructs.lambda_function import LambdaServiceConstruct
 from ml_platform.infra.constructs.multi_region import MultiRegionConstruct
@@ -305,6 +306,148 @@ class TestLambdaServiceConstruct:
         template.resource_count_is("AWS::Lambda::Url", 0)
         assert fn.function_url == ""
 
+    def test_s3_trigger_creates_notification(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "S3TriggerStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="img-processor",
+            code_path=_lambda_code_dir,
+            s3_trigger=LambdaServiceConstruct.S3Trigger(
+                bucket=bucket,
+                prefix="uploads/",
+                suffix=".jpg",
+            ),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "Custom::S3BucketNotifications",
+            Match.object_like({
+                "NotificationConfiguration": Match.object_like({
+                    "LambdaFunctionConfigurations": Match.array_with([
+                        Match.object_like({
+                            "Events": ["s3:ObjectCreated:*"],
+                            "Filter": Match.object_like({
+                                "Key": Match.object_like({
+                                    "FilterRules": Match.array_with([
+                                        Match.object_like({"Name": "suffix", "Value": ".jpg"}),
+                                        Match.object_like({"Name": "prefix", "Value": "uploads/"}),
+                                    ]),
+                                }),
+                            }),
+                        }),
+                    ]),
+                }),
+            }),
+        )
+
+    def test_s3_trigger_grants_read(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "S3ReadStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="s3-reader",
+            code_path=_lambda_code_dir,
+            s3_trigger=LambdaServiceConstruct.S3Trigger(bucket=bucket),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::IAM::Policy",
+            Match.object_like({
+                "PolicyDocument": Match.object_like({
+                    "Statement": Match.array_with([
+                        Match.object_like({
+                            "Action": Match.array_with(["s3:GetObject*", "s3:GetBucket*", "s3:List*"]),
+                        }),
+                    ]),
+                }),
+            }),
+        )
+
+    def test_s3_trigger_injects_bucket_env(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "S3EnvStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="env-trigger",
+            code_path=_lambda_code_dir,
+            s3_trigger=LambdaServiceConstruct.S3Trigger(bucket=bucket),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Lambda::Function",
+            Match.object_like({
+                "Environment": Match.object_like({
+                    "Variables": Match.object_like({
+                        "S3_TRIGGER_BUCKET": Match.any_value(),
+                    }),
+                }),
+            }),
+        )
+
+    def test_s3_trigger_with_multiple_event_types(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "MultiEventStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="multi-event",
+            code_path=_lambda_code_dir,
+            s3_trigger=LambdaServiceConstruct.S3Trigger(
+                bucket=bucket,
+                events=[s3.EventType.OBJECT_CREATED, s3.EventType.OBJECT_REMOVED],
+            ),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "Custom::S3BucketNotifications",
+            Match.object_like({
+                "NotificationConfiguration": Match.object_like({
+                    "LambdaFunctionConfigurations": Match.array_with([
+                        Match.object_like({"Events": ["s3:ObjectCreated:*"]}),
+                        Match.object_like({"Events": ["s3:ObjectRemoved:*"]}),
+                    ]),
+                }),
+            }),
+        )
+
+    def test_s3_trigger_with_secrets_and_env(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "ComboStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="combo-fn",
+            code_path=_lambda_code_dir,
+            environment={"APP_MODE": "processor"},
+            secrets={"API_KEY": "arn:aws:secretsmanager:us-east-1:123:secret:key"},
+            s3_trigger=LambdaServiceConstruct.S3Trigger(
+                bucket=bucket,
+                prefix="data/",
+            ),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Lambda::Function",
+            Match.object_like({
+                "Environment": Match.object_like({
+                    "Variables": Match.object_like({
+                        "APP_MODE": "processor",
+                        "API_KEY": "arn:aws:secretsmanager:us-east-1:123:secret:key",
+                        "S3_TRIGGER_BUCKET": Match.any_value(),
+                    }),
+                }),
+            }),
+        )
+
 
 # ---------------------------------------------------------------------------
 # NetworkConstruct
@@ -510,3 +653,144 @@ class TestSageMakerEndpointConstruct:
         template.resource_count_is("AWS::SageMaker::EndpointConfig", 1)
         template.resource_count_is("AWS::SageMaker::Endpoint", 1)
         assert ep.endpoint_name == "my-ep"
+
+
+# ---------------------------------------------------------------------------
+# CognitoConstruct
+# ---------------------------------------------------------------------------
+
+
+class TestCognitoConstruct:
+    def test_creates_user_pool(self) -> None:
+        app = App()
+        stack = Stack(app, "CognitoStack")
+        CognitoConstruct(stack, "Auth", service_name="admin")
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::Cognito::UserPool", 1)
+        template.resource_count_is("AWS::Cognito::UserPoolClient", 1)
+
+    def test_self_signup_disabled(self) -> None:
+        app = App()
+        stack = Stack(app, "NoSignupStack")
+        CognitoConstruct(stack, "Auth", service_name="admin")
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPool",
+            Match.object_like({
+                "Policies": Match.object_like({
+                    "PasswordPolicy": Match.object_like({
+                        "MinimumLength": 12,
+                        "RequireLowercase": True,
+                        "RequireUppercase": True,
+                        "RequireNumbers": True,
+                        "RequireSymbols": True,
+                    }),
+                }),
+            }),
+        )
+
+    def test_email_sign_in(self) -> None:
+        app = App()
+        stack = Stack(app, "EmailStack")
+        CognitoConstruct(stack, "Auth", service_name="admin")
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPool",
+            Match.object_like({
+                "UsernameAttributes": ["email"],
+                "AutoVerifiedAttributes": ["email"],
+            }),
+        )
+
+    def test_custom_password_policy(self) -> None:
+        app = App()
+        stack = Stack(app, "CustomPwStack")
+        CognitoConstruct(
+            stack, "Auth",
+            service_name="custom-pw",
+            password_policy=CognitoConstruct.PasswordPolicy(
+                min_length=8,
+                require_symbols=False,
+            ),
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPool",
+            Match.object_like({
+                "Policies": Match.object_like({
+                    "PasswordPolicy": Match.object_like({
+                        "MinimumLength": 8,
+                        "RequireSymbols": False,
+                    }),
+                }),
+            }),
+        )
+
+    def test_exposes_properties(self) -> None:
+        app = App()
+        stack = Stack(app, "PropStack")
+        auth = CognitoConstruct(stack, "Auth", service_name="props")
+        assert auth.user_pool is not None
+        assert auth.user_pool_id is not None
+        assert auth.app_client is not None
+        assert auth.app_client_id is not None
+        assert auth.domain is None
+
+    def test_domain_prefix(self) -> None:
+        app = App()
+        stack = Stack(app, "DomainStack")
+        auth = CognitoConstruct(
+            stack, "Auth",
+            service_name="domain-svc",
+            domain_prefix="my-app-auth",
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::Cognito::UserPoolDomain", 1)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPoolDomain",
+            Match.object_like({
+                "Domain": "my-app-auth",
+            }),
+        )
+        assert auth.domain is not None
+
+    def test_no_domain_by_default(self) -> None:
+        app = App()
+        stack = Stack(app, "NoDomainStack")
+        auth = CognitoConstruct(stack, "Auth", service_name="no-domain")
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::Cognito::UserPoolDomain", 0)
+
+    def test_pool_naming(self) -> None:
+        app = App()
+        stack = Stack(app, "NamingStack")
+        CognitoConstruct(stack, "Auth", service_name="studio-admin")
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPool",
+            Match.object_like({
+                "UserPoolName": "studio-admin-users",
+            }),
+        )
+
+    def test_cfn_outputs(self) -> None:
+        app = App()
+        stack = Stack(app, "OutputStack")
+        CognitoConstruct(stack, "Auth", service_name="outputs")
+        template = Template.from_stack(stack)
+        outputs = template.to_json().get("Outputs", {})
+        output_descriptions = [v.get("Description", "") for v in outputs.values()]
+        assert any("User Pool ID" in d for d in output_descriptions)
+        assert any("App Client ID" in d for d in output_descriptions)
+
+    def test_retain_removal_policy_by_default(self) -> None:
+        app = App()
+        stack = Stack(app, "RetainStack")
+        CognitoConstruct(stack, "Auth", service_name="retain")
+        template = Template.from_stack(stack)
+        template.has_resource(
+            "AWS::Cognito::UserPool",
+            Match.object_like({
+                "DeletionPolicy": "Retain",
+            }),
+        )
