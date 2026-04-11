@@ -18,9 +18,9 @@ Usage — HTTP endpoint::
     )
     print(fn.function_url)
 
-Usage — S3 event trigger::
+Usage — S3 image-processing pipeline with Docker bundling::
 
-    from aws_cdk import aws_s3 as s3
+    from aws_cdk import BundlingOptions, DockerImage, aws_s3 as s3
     from ml_platform.infra.constructs import LambdaServiceConstruct
 
     uploads = s3.Bucket(self, "Uploads")
@@ -30,11 +30,22 @@ Usage — S3 event trigger::
         service_name="image-processor",
         code_path="./processor",
         handler="app.handler",
+        bundling=BundlingOptions(
+            image=DockerImage.from_registry(
+                "public.ecr.aws/sam/build-python3.12:latest",
+            ),
+            command=[
+                "bash", "-c",
+                "pip install -r requirements.txt -t /asset-output"
+                " && cp -au . /asset-output",
+            ],
+        ),
         s3_trigger=LambdaServiceConstruct.S3Trigger(
             bucket=uploads,
-            prefix="uploads/",
+            prefix="originals/",
             suffix=".jpg",
-            events=[s3.EventType.OBJECT_CREATED],
+            read_prefix="originals/*",
+            write_prefix="web/*",
         ),
         create_function_url=False,
     )
@@ -45,6 +56,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from aws_cdk import (
+    BundlingOptions,
     CfnOutput,
     Duration,
     aws_iam as iam,
@@ -73,11 +85,16 @@ class LambdaServiceConstruct(Construct):
             var and grants the function ``secretsmanager:GetSecretValue``
             on those ARNs so the runtime can resolve them via
             :class:`~ml_platform.secrets.AWSSecretResolver`.
+        bundling: Docker bundling options for the Lambda code asset.
+            Required when the deployment package contains native
+            extensions (e.g. Pillow) that must be compiled for the
+            Lambda runtime.  When ``None``, the code directory is
+            packaged as-is.
         create_function_url: Create a Lambda Function URL.
         s3_trigger: Optional :class:`S3Trigger` that wires an S3 bucket
             to invoke this function on object events.  The construct
-            grants ``s3:GetObject`` on the bucket and injects
-            ``S3_TRIGGER_BUCKET`` into the function environment.
+            grants S3 read (and optionally write) permissions and
+            injects ``S3_TRIGGER_BUCKET`` into the function environment.
     """
 
     @dataclass(frozen=True)
@@ -86,10 +103,19 @@ class LambdaServiceConstruct(Construct):
 
         Attributes:
             bucket: The S3 bucket to watch.
-            prefix: Key prefix filter (e.g. ``"uploads/"``).
-            suffix: Key suffix filter (e.g. ``".jpg"``).
+            prefix: Key prefix filter for the event notification
+                (e.g. ``"uploads/"``).
+            suffix: Key suffix filter for the event notification
+                (e.g. ``".jpg"``).
             events: S3 event types that fire the notification.  Defaults
                 to ``[s3.EventType.OBJECT_CREATED]``.
+            read_prefix: Object-key pattern for scoping read grants
+                (e.g. ``"originals/*"``).  When empty, read is granted
+                on the entire bucket.
+            write_prefix: Object-key pattern for scoping write grants
+                (e.g. ``"web/*"``).  When set, the construct calls
+                ``bucket.grant_put`` scoped to this pattern.  When
+                empty, no write grant is issued.
         """
 
         bucket: s3.IBucket
@@ -98,6 +124,8 @@ class LambdaServiceConstruct(Construct):
         events: list[s3.EventType] = field(
             default_factory=lambda: [s3.EventType.OBJECT_CREATED]
         )
+        read_prefix: str = ""
+        write_prefix: str = ""
 
     def __init__(
         self,
@@ -112,6 +140,7 @@ class LambdaServiceConstruct(Construct):
         timeout: Duration = Duration.seconds(30),
         environment: dict[str, str] | None = None,
         secrets: dict[str, str] | None = None,
+        bundling: BundlingOptions | None = None,
         create_function_url: bool = True,
         s3_trigger: S3Trigger | None = None,
     ) -> None:
@@ -126,13 +155,15 @@ class LambdaServiceConstruct(Construct):
         if s3_trigger is not None:
             merged_env["S3_TRIGGER_BUCKET"] = s3_trigger.bucket.bucket_name
 
+        code = lambda_.Code.from_asset(code_path, bundling=bundling) if bundling else lambda_.Code.from_asset(code_path)
+
         fn = lambda_.Function(
             self,
             "Function",
             function_name=service_name,
             runtime=runtime,
             handler=handler,
-            code=lambda_.Code.from_asset(code_path),
+            code=code,
             memory_size=memory_size,
             timeout=timeout,
             environment=merged_env,
@@ -148,7 +179,13 @@ class LambdaServiceConstruct(Construct):
             )
 
         if s3_trigger is not None:
-            s3_trigger.bucket.grant_read(fn)
+            if s3_trigger.read_prefix:
+                s3_trigger.bucket.grant_read(fn, s3_trigger.read_prefix)
+            else:
+                s3_trigger.bucket.grant_read(fn)
+
+            if s3_trigger.write_prefix:
+                s3_trigger.bucket.grant_put(fn, s3_trigger.write_prefix)
 
             has_filter = bool(s3_trigger.prefix or s3_trigger.suffix)
             filter_args: list[s3.NotificationKeyFilter] = []

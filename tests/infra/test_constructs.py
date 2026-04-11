@@ -13,7 +13,18 @@ import tempfile
 from typing import Any
 
 import pytest
-from aws_cdk import App, Duration, Stack, aws_ec2 as ec2, aws_ecs as ecs, aws_s3 as s3, aws_iam as iam_cdk
+from aws_cdk import (
+    App,
+    BundlingOptions,
+    DockerImage,
+    Duration,
+    Stack,
+    aws_cognito as cognito,
+    aws_ec2 as ec2,
+    aws_ecs as ecs,
+    aws_iam as iam_cdk,
+    aws_s3 as s3,
+)
 from aws_cdk.assertions import Capture, Match, Template
 
 from ml_platform.infra.constructs.cdn import CDNConstruct
@@ -448,6 +459,102 @@ class TestLambdaServiceConstruct:
             }),
         )
 
+    def test_s3_trigger_write_prefix_grants_put(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "WritePrefixStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="writer-fn",
+            code_path=_lambda_code_dir,
+            s3_trigger=LambdaServiceConstruct.S3Trigger(
+                bucket=bucket,
+                prefix="originals/",
+                read_prefix="originals/*",
+                write_prefix="web/*",
+            ),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        tpl_json = template.to_json()
+        import json as _json
+        tpl_str = _json.dumps(tpl_json)
+        assert "s3:PutObject" in tpl_str
+
+    def test_s3_trigger_read_prefix_scoped(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "ReadPrefixStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="scoped-reader",
+            code_path=_lambda_code_dir,
+            s3_trigger=LambdaServiceConstruct.S3Trigger(
+                bucket=bucket,
+                read_prefix="originals/*",
+            ),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        tpl_json = template.to_json()
+        import json as _json
+        tpl_str = _json.dumps(tpl_json)
+        assert "/originals/*" in tpl_str
+        template.has_resource_properties(
+            "AWS::IAM::Policy",
+            Match.object_like({
+                "PolicyDocument": Match.object_like({
+                    "Statement": Match.array_with([
+                        Match.object_like({
+                            "Action": Match.array_with(["s3:GetObject*", "s3:GetBucket*", "s3:List*"]),
+                        }),
+                    ]),
+                }),
+            }),
+        )
+
+    def test_s3_trigger_no_write_by_default(self, _lambda_code_dir: str) -> None:
+        app = App()
+        stack = Stack(app, "NoWriteStack")
+        bucket = s3.Bucket(stack, "Uploads")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="no-write-fn",
+            code_path=_lambda_code_dir,
+            s3_trigger=LambdaServiceConstruct.S3Trigger(bucket=bucket),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        tpl_json = template.to_json()
+        import json as _json
+        tpl_str = _json.dumps(tpl_json)
+        assert "s3:PutObject" not in tpl_str
+
+    def test_bundling_options_passed_to_code_asset(self, _lambda_code_dir: str) -> None:
+        import pathlib
+
+        pathlib.Path(_lambda_code_dir, "requirements.txt").write_text("")
+        app = App()
+        stack = Stack(app, "BundlingStack")
+        LambdaServiceConstruct(
+            stack, "Fn",
+            service_name="bundled-fn",
+            code_path=_lambda_code_dir,
+            bundling=BundlingOptions(
+                image=DockerImage.from_registry(
+                    "public.ecr.aws/sam/build-python3.12:latest",
+                ),
+                command=[
+                    "bash", "-c",
+                    "pip install -r requirements.txt -t /asset-output"
+                    " && cp -au . /asset-output",
+                ],
+            ),
+            create_function_url=False,
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::Lambda::Function", 1)
+
 
 # ---------------------------------------------------------------------------
 # NetworkConstruct
@@ -794,3 +901,46 @@ class TestCognitoConstruct:
                 "DeletionPolicy": "Retain",
             }),
         )
+
+    def test_admin_user_password_auth_enabled_by_default(self) -> None:
+        app = App()
+        stack = Stack(app, "AdminAuthStack")
+        CognitoConstruct(stack, "Auth", service_name="admin-auth")
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPoolClient",
+            Match.object_like({
+                "ExplicitAuthFlows": Match.array_with([
+                    "ALLOW_USER_PASSWORD_AUTH",
+                    "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+                    "ALLOW_REFRESH_TOKEN_AUTH",
+                ]),
+            }),
+        )
+
+    def test_custom_auth_flows_override(self) -> None:
+        app = App()
+        stack = Stack(app, "CustomFlowStack")
+        CognitoConstruct(
+            stack, "Auth",
+            service_name="custom-flow",
+            auth_flows=cognito.AuthFlow(
+                user_srp=True,
+                user_password=False,
+                admin_user_password=False,
+            ),
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPoolClient",
+            Match.object_like({
+                "ExplicitAuthFlows": Match.array_with([
+                    "ALLOW_USER_SRP_AUTH",
+                    "ALLOW_REFRESH_TOKEN_AUTH",
+                ]),
+            }),
+        )
+        tpl_json = template.to_json()
+        import json as _json
+        tpl_str = _json.dumps(tpl_json)
+        assert "ALLOW_ADMIN_USER_PASSWORD_AUTH" not in tpl_str

@@ -3,7 +3,7 @@
 Provisions a Cognito User Pool with a secure default configuration
 suitable for admin/back-office authentication: self-signup disabled,
 strong password policy, and an app client configured for the
-``USER_PASSWORD_AUTH`` flow.
+``USER_PASSWORD_AUTH`` and ``ADMIN_USER_PASSWORD_AUTH`` flows.
 
 Usage::
 
@@ -41,8 +41,9 @@ class CognitoConstruct(Construct):
     * Strong password policy (configurable length and character
       requirements).
     * Email-based sign-in with required email attribute.
-    * An app client authorised for the ``USER_PASSWORD_AUTH`` and
-      ``ALLOW_REFRESH_TOKEN_AUTH`` flows.
+    * An app client authorised for ``USER_PASSWORD_AUTH`` and
+      ``ADMIN_USER_PASSWORD_AUTH`` flows by default (matching the
+      ``AdminInitiateAuthCommand`` pattern used by Next.js backends).
     * Optional custom domain prefix for the hosted UI.
 
     Args:
@@ -55,8 +56,9 @@ class CognitoConstruct(Construct):
             Defaults to ``RETAIN`` to avoid accidental deletion.
         domain_prefix: If set, creates a Cognito hosted-UI domain at
             ``https://<prefix>.auth.<region>.amazoncognito.com``.
-        additional_auth_flows: Extra authentication flows to enable on
-            the app client beyond ``USER_PASSWORD_AUTH``.
+        auth_flows: Override the default Cognito auth-flow configuration.
+            When ``None``, the construct enables ``USER_PASSWORD_AUTH``
+            and ``ADMIN_USER_PASSWORD_AUTH``.
     """
 
     @dataclass(frozen=True)
@@ -79,6 +81,13 @@ class CognitoConstruct(Construct):
         require_symbols: bool = True
         temp_password_validity_days: int = 7
 
+    _DEFAULT_AUTH_FLOWS = cognito.AuthFlow(
+        user_password=True,
+        admin_user_password=True,
+        custom=False,
+        user_srp=False,
+    )
+
     def __init__(
         self,
         scope: Construct,
@@ -88,7 +97,7 @@ class CognitoConstruct(Construct):
         password_policy: PasswordPolicy | None = None,
         removal_policy: RemovalPolicy = RemovalPolicy.RETAIN,
         domain_prefix: str = "",
-        additional_auth_flows: list[str] | None = None,
+        auth_flows: cognito.AuthFlow | None = None,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -117,17 +126,12 @@ class CognitoConstruct(Construct):
         )
         self._user_pool = pool
 
-        auth_flows = cognito.AuthFlow(
-            user_password=True,
-            custom=False,
-            user_srp=False,
-            admin_user_password=False,
-        )
+        resolved_auth_flows = auth_flows if auth_flows is not None else self._DEFAULT_AUTH_FLOWS
 
         client = pool.add_client(
             "AppClient",
             user_pool_client_name=f"{service_name}-client" if service_name else None,
-            auth_flows=auth_flows,
+            auth_flows=resolved_auth_flows,
             prevent_user_existence_errors=True,
             access_token_validity=Duration.hours(1),
             id_token_validity=Duration.hours(1),
