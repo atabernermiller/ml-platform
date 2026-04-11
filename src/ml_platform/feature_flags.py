@@ -12,7 +12,7 @@ Usage::
     if gate.is_enabled("new_ui"):
         ...
 
-    gate = DynamoDBFeatureGate(table_name="feature-flags", region="us-east-1")
+    gate = DynamoDBFeatureGate(table_name="feature-flags")
     variant = gate.get_variant("checkout_flow", context={"user_id": "u-123"})
 """
 
@@ -25,6 +25,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import FeatureGate
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table as DynamoDBTable_
@@ -115,12 +116,12 @@ class DynamoDBFeatureGate(FeatureGate):
     def __init__(
         self,
         table_name: str,
-        region: str = "us-east-1",
+        region: str | None = None,
         cache_ttl_s: int = 60,
     ) -> None:
         import boto3
 
-        dynamodb = boto3.resource("dynamodb", region_name=region)
+        dynamodb = boto3.resource("dynamodb", region_name=resolve_region(region))
         self._table: DynamoDBTable_ = dynamodb.Table(table_name)
         self._cache_ttl_s = cache_ttl_s
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}

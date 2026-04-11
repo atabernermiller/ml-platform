@@ -10,13 +10,14 @@ Usage::
     yaml_str = generate_github_actions(
         service_name="inference-api",
         python_version="3.12",
-        aws_region="us-east-1",
     )
 """
 
 from __future__ import annotations
 
 import logging
+
+from ml_platform.config import resolve_region
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def generate_github_actions(
     *,
     service_name: str,
     python_version: str = "3.12",
-    aws_region: str = "us-east-1",
+    aws_region: str | None = None,
     ecr_repository: str = "",
     run_tests: bool = True,
     deploy_ecs: bool = False,
@@ -52,6 +53,7 @@ def generate_github_actions(
     Returns:
         GitHub Actions workflow YAML as a string.
     """
+    resolved_region = resolve_region(aws_region)
     lines: list[str] = [
         f"name: {service_name} CI/CD",
         "",
@@ -62,7 +64,7 @@ def generate_github_actions(
         "    branches: [main]",
         "",
         "env:",
-        f"  AWS_REGION: {aws_region}",
+        f"  AWS_REGION: {resolved_region}",
     ]
 
     if ecr_repository:

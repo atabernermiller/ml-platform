@@ -245,7 +245,7 @@ def _height_of(panels: list[dict[str, Any]]) -> int:
 
 def generate_grafana_dashboard(
     service_name: str,
-    region: str = "us-east-1",
+    region: str | None = None,
     namespace: str = _NAMESPACE,
 ) -> dict[str, Any]:
     """Generate a Grafana dashboard for a stateful bandit service.
@@ -253,15 +253,18 @@ def generate_grafana_dashboard(
     .. deprecated::
         Use :func:`generate_dashboard` with ``panel_sets=["core", "stateful"]``.
     """
-    config = ServiceConfig(service_name=service_name, aws_region=region)
+    from ml_platform.config import resolve_region
+
+    resolved = resolve_region(region)
+    config = ServiceConfig(service_name=service_name, aws_region=resolved)
     return generate_dashboard(
-        config, panel_sets=["core", "stateful"], region=region, namespace=namespace
+        config, panel_sets=["core", "stateful"], region=resolved, namespace=namespace
     )
 
 
 def generate_cloudwatch_dashboard(
     service_name: str,
-    region: str = "us-east-1",
+    region: str | None = None,
     namespace: str = _NAMESPACE,
 ) -> str:
     """Generate a CloudWatch Dashboard body JSON string.
@@ -269,6 +272,9 @@ def generate_cloudwatch_dashboard(
     .. deprecated::
         Use :func:`generate_dashboard` and convert to CloudWatch format.
     """
+    from ml_platform.config import resolve_region
+
+    region = resolve_region(region)
 
     def _metric_widget(
         title: str, metric_name: str, stat: str = "Average", width: int = 12

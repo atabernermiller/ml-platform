@@ -8,7 +8,7 @@ Usage::
 
     from ml_platform.email import SESEmailBackend, ConsoleEmailBackend
 
-    backend = SESEmailBackend(region="us-east-1", default_sender="noreply@example.com")
+    backend = SESEmailBackend(default_sender="noreply@example.com")
     backend.send(
         to=["user@example.com"],
         subject="Order Confirmed",
@@ -28,6 +28,7 @@ from email.mime.text import MIMEText
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import EmailBackend
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_ses.client import SESClient
@@ -99,16 +100,16 @@ class SESEmailBackend(EmailBackend):
 
     def __init__(
         self,
-        region: str = "us-east-1",
+        region: str | None = None,
         default_sender: str = "",
         configuration_set: str = "",
     ) -> None:
         import boto3
 
-        self._region = region
+        self._region = resolve_region(region)
         self._default_sender = default_sender
         self._configuration_set = configuration_set
-        self._ses: SESClient = boto3.client("ses", region_name=region)
+        self._ses: SESClient = boto3.client("ses", region_name=self._region)
 
     def send(
         self,

@@ -8,7 +8,7 @@ Usage::
 
     from ml_platform.secrets import AWSSecretResolver, EnvSecretResolver
 
-    resolver = AWSSecretResolver(region="us-east-1")
+    resolver = AWSSecretResolver()
     db_password = resolver.get("prod/db/password")
     db_config = resolver.get_json("prod/db/config")
 """
@@ -22,6 +22,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import SecretResolver
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_secretsmanager.client import SecretsManagerClient
@@ -50,10 +51,12 @@ class AWSSecretResolver(SecretResolver):
         cache_ttl_s: Cache time-to-live in seconds (0 disables caching).
     """
 
-    def __init__(self, region: str = "us-east-1", cache_ttl_s: int = 300) -> None:
+    def __init__(self, region: str | None = None, cache_ttl_s: int = 300) -> None:
         import boto3
 
-        self._client: SecretsManagerClient = boto3.client("secretsmanager", region_name=region)
+        self._client: SecretsManagerClient = boto3.client(
+            "secretsmanager", region_name=resolve_region(region)
+        )
         self._cache_ttl_s = cache_ttl_s
         self._cache: dict[str, tuple[str, float]] = {}
 

@@ -13,7 +13,7 @@ Usage::
     from ml_platform.s3_events import S3NotificationManager, FileStoreEventEmitter
 
     # AWS: configure real S3 notifications
-    mgr = S3NotificationManager(bucket="my-assets", region="us-east-1")
+    mgr = S3NotificationManager(bucket="my-assets")
     mgr.add_queue_notification(queue_arn="arn:aws:sqs:...", events=["s3:ObjectCreated:*"])
 
     # Local: wrap a FileStore + EventBus for in-process event dispatch
@@ -27,6 +27,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import EventBus, FileStore
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_s3.client import S3Client
@@ -57,11 +58,11 @@ class S3NotificationManager:
         region: AWS region.
     """
 
-    def __init__(self, bucket: str, region: str = "us-east-1") -> None:
+    def __init__(self, bucket: str, region: str | None = None) -> None:
         import boto3
 
         self._bucket = bucket
-        self._s3: S3Client = boto3.client("s3", region_name=region)
+        self._s3: S3Client = boto3.client("s3", region_name=resolve_region(region))
 
     def get_configuration(self) -> dict[str, Any]:
         """Return the current notification configuration for the bucket.

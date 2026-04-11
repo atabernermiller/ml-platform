@@ -172,7 +172,7 @@ def _remove_auto_scaling(res: dict[str, Any]) -> None:
 
 def run_destroy_sagemaker(
     service_name: str,
-    region: str = "us-east-1",
+    region: str | None = None,
     *,
     force: bool = False,
     verify_only: bool = False,

@@ -64,7 +64,6 @@ class TestSESEmailBackend:
         ses.verify_email_identity(EmailAddress="noreply@example.com")
 
         backend = SESEmailBackend(
-            region="us-east-1",
             default_sender="noreply@example.com",
         )
         msg_id = backend.send(
@@ -76,7 +75,7 @@ class TestSESEmailBackend:
         assert len(msg_id) > 0
 
     def test_send_without_sender_raises(self) -> None:
-        backend = SESEmailBackend(region="us-east-1")
+        backend = SESEmailBackend()
         with pytest.raises(ValueError, match="No sender address"):
             backend.send(
                 to=["user@test.com"],

@@ -23,6 +23,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import CDNBackend
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_cloudfront.client import CloudFrontClient
@@ -59,11 +60,11 @@ class CloudFrontCDN(CDNBackend):
         self,
         domain: str,
         distribution_id: str = "",
-        region: str = "us-east-1",
+        region: str | None = None,
     ) -> None:
         self._domain = domain.rstrip("/")
         self._distribution_id = distribution_id
-        self._region = region
+        self._region = resolve_region(region)
         self._cf_client: CloudFrontClient | None = None
 
     def _get_client(self) -> CloudFrontClient:

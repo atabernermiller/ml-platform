@@ -13,7 +13,7 @@ Usage::
 
     from ml_platform.users import CognitoUserPool, InMemoryUserPool
 
-    pool = CognitoUserPool(user_pool_id="us-east-1_Abc123", region="us-east-1")
+    pool = CognitoUserPool(user_pool_id="us-east-1_Abc123")
     pool.create_user("alice", email="alice@example.com")
     user = pool.get_user("alice")
 """
@@ -26,6 +26,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import UserPool
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_cognito_idp.client import CognitoIdentityProviderClient
@@ -57,12 +58,12 @@ class CognitoUserPool(UserPool):
         region: AWS region.
     """
 
-    def __init__(self, user_pool_id: str, region: str = "us-east-1") -> None:
+    def __init__(self, user_pool_id: str, region: str | None = None) -> None:
         import boto3
 
         self._pool_id = user_pool_id
         self._client: CognitoIdentityProviderClient = boto3.client(
-            "cognito-idp", region_name=region
+            "cognito-idp", region_name=resolve_region(region)
         )
 
     def create_user(

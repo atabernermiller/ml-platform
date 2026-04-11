@@ -60,7 +60,6 @@ class TestDynamoDBTableBatch:
         return DynamoDBTable(
             table_name=table_name,
             partition_key="pk",
-            region="us-east-1",
         )
 
     def test_batch_put_and_scan(self) -> None:

@@ -36,7 +36,7 @@ Additional cross-cutting capabilities:
 
 from ml_platform._version import __version__
 from ml_platform.alerting import AlertEvaluator, AlertRule
-from ml_platform.config import AgentConfig, LLMConfig, ServiceConfig, StatefulConfig
+from ml_platform.config import AgentConfig, LLMConfig, ServiceConfig, StatefulConfig, resolve_region
 from ml_platform.evaluation import EvaluationReporter, EvaluationResult, EvaluationStatus
 from ml_platform.health import HealthCheck, HealthRegistry
 from ml_platform.log import bind, configure_logging
@@ -59,5 +59,6 @@ __all__ = [
     "__version__",
     "bind",
     "configure_logging",
+    "resolve_region",
     "scheduled",
 ]

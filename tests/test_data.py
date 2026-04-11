@@ -121,7 +121,6 @@ class TestDynamoDBTable:
             table_name=table_name,
             partition_key="pk",
             sort_key="sk",
-            region="us-east-1",
         )
 
     def test_put_and_get(self) -> None:

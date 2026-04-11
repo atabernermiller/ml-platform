@@ -13,7 +13,7 @@ Usage::
 
     from ml_platform.events import EventBridgeBus, InMemoryEventBus
 
-    bus = EventBridgeBus(bus_name="my-app-events", region="us-east-1")
+    bus = EventBridgeBus(bus_name="my-app-events")
     bus.publish(
         source="orders.service",
         detail_type="OrderCreated",
@@ -30,6 +30,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Callable
 
 from ml_platform._interfaces import EventBus
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_events.client import EventBridgeClient
@@ -62,12 +63,14 @@ class EventBridgeBus(EventBus):
     def __init__(
         self,
         bus_name: str = "default",
-        region: str = "us-east-1",
+        region: str | None = None,
     ) -> None:
         import boto3
 
         self._bus_name = bus_name
-        self._client: EventBridgeClient = boto3.client("events", region_name=region)
+        self._client: EventBridgeClient = boto3.client(
+            "events", region_name=resolve_region(region)
+        )
 
     def publish(
         self,

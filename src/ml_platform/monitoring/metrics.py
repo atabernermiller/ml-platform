@@ -18,6 +18,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from ml_platform.config import resolve_region
+
 if TYPE_CHECKING:
     from mypy_boto3_cloudwatch.client import CloudWatchClient
 
@@ -53,11 +55,11 @@ class MetricsEmitter:
     def __init__(
         self,
         service_name: str,
-        region: str = "us-east-1",
+        region: str | None = None,
         namespace: str = _EMF_NAMESPACE,
     ) -> None:
         self._service_name = service_name
-        self._region = region
+        self._region = resolve_region(region)
         self._namespace = namespace
         self._cw_client: CloudWatchClient | None = None
 

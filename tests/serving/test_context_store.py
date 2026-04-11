@@ -34,7 +34,6 @@ def test_in_memory_lru_eviction() -> None:
 def test_dynamodb_put_get(mock_dynamodb: None) -> None:
     store = DynamoDBContextStore(
         table_name="test-context",
-        region="us-east-1",
         ttl_s=3600,
     )
     ctx = {"features": [1.0, 2.0], "model": "v1"}
@@ -63,7 +62,6 @@ def test_dynamodb_get_missing_key() -> None:
 
     store = DynamoDBContextStore(
         table_name="missing-key-test",
-        region="us-east-1",
         ttl_s=3600,
     )
     assert store.get("never-stored") is None

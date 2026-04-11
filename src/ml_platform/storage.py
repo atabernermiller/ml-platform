@@ -16,7 +16,7 @@ Usage::
 
     from ml_platform.storage import S3FileStore, LocalFileStore
 
-    store = S3FileStore(bucket="my-assets", region="us-east-1")
+    store = S3FileStore(bucket="my-assets")
     store.put("images/photo.jpg", data, content_type="image/jpeg")
     url = store.public_url("images/photo.jpg")
 """
@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 from ml_platform._interfaces import FileStore
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_s3.client import S3Client
@@ -67,16 +68,16 @@ class S3FileStore(FileStore):
         self,
         bucket: str,
         prefix: str = "",
-        region: str = "us-east-1",
+        region: str | None = None,
         cloudfront_domain: str = "",
     ) -> None:
         import boto3
 
         self._bucket = bucket
         self._prefix = prefix.strip("/")
-        self._region = region
+        self._region = resolve_region(region)
         self._cloudfront_domain = cloudfront_domain.rstrip("/")
-        self._s3: S3Client = boto3.client("s3", region_name=region)
+        self._s3: S3Client = boto3.client("s3", region_name=self._region)
 
     def _full_key(self, key: str) -> str:
         if self._prefix:

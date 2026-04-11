@@ -20,7 +20,6 @@ def test_upload_and_download(mock_s3: None) -> None:
     mgr = S3StateManager(
         bucket="test-checkpoint-bucket",
         prefix="checkpoints/",
-        region="us-east-1",
     )
 
     with tempfile.TemporaryDirectory() as src:
@@ -39,7 +38,6 @@ def test_download_latest_empty(mock_s3: None) -> None:
     mgr = S3StateManager(
         bucket="test-checkpoint-bucket",
         prefix="empty-prefix/",
-        region="us-east-1",
     )
     assert mgr.download_latest() is None
 
@@ -48,7 +46,6 @@ def test_list_checkpoints(mock_s3: None) -> None:
     mgr = S3StateManager(
         bucket="test-checkpoint-bucket",
         prefix="checkpoints/",
-        region="us-east-1",
     )
 
     with tempfile.TemporaryDirectory() as src:

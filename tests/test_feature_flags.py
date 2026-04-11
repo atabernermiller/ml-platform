@@ -59,7 +59,6 @@ class TestDynamoDBFeatureGate:
         )
         return DynamoDBFeatureGate(
             table_name="feature-flags",
-            region="us-east-1",
             cache_ttl_s=0,
         )
 

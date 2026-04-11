@@ -2,8 +2,9 @@
 
 Usage::
 
-    ml-platform check     --service-name my-svc --s3-bucket my-ckpt --region us-east-1
-    ml-platform bootstrap --service-name my-svc --s3-bucket my-ckpt --region us-east-1
+    ml-platform check     --service-name my-svc --s3-bucket my-ckpt
+    ml-platform bootstrap --service-name my-svc --s3-bucket my-ckpt
+    ml-platform bootstrap --service-name my-svc --github-oidc --repo myorg/my-svc
     ml-platform init      --template agent --name my-agent
     ml-platform deploy aws       --service-name my-chatbot
     ml-platform deploy sagemaker --service-name my-chatbot
@@ -18,7 +19,7 @@ import sys
 
 from ml_platform.cli.check import run_check
 from ml_platform.cli.bootstrap import run_bootstrap
-from ml_platform.config import ServiceConfig
+from ml_platform.config import ServiceConfig, resolve_region
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -34,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--service-name", required=True, help="Service name (used for resource naming)."
     )
     shared.add_argument(
-        "--region", default="us-east-1", help="AWS region (default: us-east-1)."
+        "--region", default=None, help="AWS region (default: auto-detected)."
     )
     shared.add_argument(
         "--s3-bucket", default="", help="S3 checkpoint bucket name."
@@ -61,6 +62,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print what would be created without making changes.",
+    )
+    bp.add_argument(
+        "--github-oidc",
+        action="store_true",
+        help="Create the GitHub Actions OIDC provider and deploy role.",
+    )
+    bp.add_argument(
+        "--repo",
+        default="",
+        help="GitHub repository (owner/repo) for OIDC trust policy.",
     )
 
     # -- init ----------------------------------------------------------------
@@ -119,7 +130,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--service-name", required=True, help="Service to destroy."
     )
     destroy_p.add_argument(
-        "--region", default="us-east-1", help="AWS region."
+        "--region", default=None, help="AWS region (default: auto-detected)."
     )
     destroy_p.add_argument(
         "--force", action="store_true", help="Skip name confirmation."
@@ -137,7 +148,7 @@ def _config_from_args(args: argparse.Namespace) -> ServiceConfig:
     table = args.dynamodb_table or f"{args.service_name}-context"
     return ServiceConfig(
         service_name=args.service_name,
-        aws_region=args.region,
+        aws_region=resolve_region(args.region),
         s3_checkpoint_bucket=args.s3_bucket,
         s3_checkpoint_prefix=args.s3_prefix,
         state_table_name=table,
@@ -190,7 +201,7 @@ def main() -> None:
 
             ok = run_destroy(
                 service_name=args.service_name,
-                region=args.region,
+                region=resolve_region(args.region),
                 force=args.force,
                 verify_only=args.verify_only,
             )
@@ -200,7 +211,7 @@ def main() -> None:
 
             ok = run_destroy_sagemaker(
                 service_name=args.service_name,
-                region=args.region,
+                region=resolve_region(args.region),
                 force=args.force,
                 verify_only=args.verify_only,
             )
@@ -215,6 +226,23 @@ def main() -> None:
         ok = run_check(config)
         sys.exit(0 if ok else 1)
     elif args.command == "bootstrap":
+        if args.github_oidc:
+            if not args.repo:
+                parser.error("--github-oidc requires --repo owner/repo")
+            from ml_platform.cli.github_oidc import bootstrap_github_oidc
+
+            try:
+                bootstrap_github_oidc(
+                    repo=args.repo,
+                    service_name=args.service_name,
+                    region=resolve_region(args.region),
+                    dry_run=args.dry_run,
+                )
+            except (ValueError, RuntimeError) as exc:
+                print(f"\n  Error: {exc}\n", file=sys.stderr)
+                sys.exit(1)
+            sys.exit(0)
+
         ok = run_bootstrap(config, dry_run=args.dry_run)
         sys.exit(0 if ok else 1)
 

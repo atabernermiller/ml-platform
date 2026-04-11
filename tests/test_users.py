@@ -85,7 +85,7 @@ class TestCognitoUserPool:
         client = boto3.client("cognito-idp", region_name="us-east-1")
         response = client.create_user_pool(PoolName="test-pool")
         pool_id = response["UserPool"]["Id"]
-        return pool_id, CognitoUserPool(user_pool_id=pool_id, region="us-east-1")
+        return pool_id, CognitoUserPool(user_pool_id=pool_id)
 
     def test_create_and_get_user(self) -> None:
         _, pool = self._create_pool()

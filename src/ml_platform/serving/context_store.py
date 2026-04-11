@@ -20,6 +20,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import ContextStore
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table as DynamoDBTable_
@@ -59,13 +60,13 @@ class DynamoDBContextStore(ContextStore):
     """
 
     def __init__(
-        self, table_name: str, region: str = "us-east-1", ttl_s: int = 86_400
+        self, table_name: str, region: str | None = None, ttl_s: int = 86_400
     ) -> None:
         import boto3
 
         self._table_name = table_name
         self._ttl_s = ttl_s
-        dynamodb = boto3.resource("dynamodb", region_name=region)
+        dynamodb = boto3.resource("dynamodb", region_name=resolve_region(region))
         self._table: DynamoDBTable_ = dynamodb.Table(table_name)
 
     def put(self, request_id: str, context: dict[str, Any]) -> None:

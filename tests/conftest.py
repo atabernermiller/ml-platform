@@ -16,7 +16,6 @@ def service_config() -> ServiceConfig:
     """Return a ``ServiceConfig`` populated with test-safe defaults."""
     return ServiceConfig(
         service_name="test-service",
-        aws_region="us-east-1",
         s3_checkpoint_bucket="test-checkpoint-bucket",
         s3_checkpoint_prefix="checkpoints/",
         checkpoint_interval_s=10,

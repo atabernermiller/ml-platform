@@ -18,6 +18,8 @@ from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
 
+from ml_platform.config import resolve_region
+
 ServiceType = Literal["llm", "agent", "stateful", "stateless"]
 DeployTarget = Literal["ecs", "sagemaker"]
 
@@ -104,7 +106,11 @@ class ProjectManifest:
     compute_size: str = "medium"
     scaling: ScalingConfig = field(default_factory=ScalingConfig)
     sagemaker: SageMakerConfig = field(default_factory=SageMakerConfig)
-    region: str = "us-east-1"
+    region: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.region:
+            self.region = resolve_region()
 
     @property
     def cpu(self) -> int:
@@ -151,7 +157,7 @@ def load_manifest(path: Path | str = "ml-platform.yaml") -> ProjectManifest:
         else raw.get("compute_size", "medium"),
         scaling=scaling,
         sagemaker=sagemaker,
-        region=raw.get("region", "us-east-1"),
+        region=raw.get("region", ""),
     )
 
 
@@ -229,7 +235,8 @@ def interactive_create(service_name: str = "") -> ProjectManifest:
     size_map = {"1": "small", "2": "medium", "3": "large", "4": "xlarge"}
     compute_size = size_map.get(size_choice, "medium")
 
-    region = _ask("  AWS region [us-east-1]: ").strip() or "us-east-1"
+    default_region = resolve_region()
+    region = _ask(f"  AWS region [{default_region}]: ").strip() or default_region
 
     manifest = ProjectManifest(
         service_name=service_name,

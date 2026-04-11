@@ -196,11 +196,13 @@ def _write_manifest(base: Path, name: str, template: TemplateName) -> None:
         "bandit": "stateful",
     }
 
+    from ml_platform.config import resolve_region
+
     features = feature_defaults.get(template, feature_defaults["chatbot"])
     manifest = (
         f"service_name: {name}\n"
         f"type: {svc_type.get(template, 'llm')}\n"
-        f"region: us-east-1\n"
+        f"region: {resolve_region()}\n"
         f"\n"
         f"features:\n"
     )

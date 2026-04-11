@@ -21,6 +21,7 @@ import time
 from typing import TYPE_CHECKING, Any, Callable
 
 from ml_platform._interfaces import ConversationStore
+from ml_platform.config import resolve_region
 from ml_platform._types import Message
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ class DynamoDBConversationStore(ConversationStore):
     def __init__(
         self,
         table_name: str,
-        region: str = "us-east-1",
+        region: str | None = None,
         ttl_s: int = 604_800,
         tokenizer: TokenizerFn | None = None,
     ) -> None:
@@ -77,7 +78,7 @@ class DynamoDBConversationStore(ConversationStore):
         self._table_name = table_name
         self._ttl_s = ttl_s
         self._tokenizer = tokenizer or _default_token_estimate
-        dynamodb = boto3.resource("dynamodb", region_name=region)
+        dynamodb = boto3.resource("dynamodb", region_name=resolve_region(region))
         self._table: DynamoDBTable_ = dynamodb.Table(table_name)
 
     def append(self, session_id: str, message: Message) -> None:

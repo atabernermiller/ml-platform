@@ -105,7 +105,7 @@ class TestSQSQueueBackend:
         response = sqs.create_queue(QueueName="test-queue")
         queue_url = response["QueueUrl"]
 
-        q = SQSQueueBackend(queue_url=queue_url, region="us-east-1")
+        q = SQSQueueBackend(queue_url=queue_url)
         msg_id = q.send({"action": "process"})
         assert isinstance(msg_id, str)
 
@@ -118,7 +118,7 @@ class TestSQSQueueBackend:
         response = sqs.create_queue(QueueName="del-queue")
         queue_url = response["QueueUrl"]
 
-        q = SQSQueueBackend(queue_url=queue_url, region="us-east-1")
+        q = SQSQueueBackend(queue_url=queue_url)
         q.send({"key": "val"})
 
         messages = q.receive(max_messages=1, wait_time_s=0)

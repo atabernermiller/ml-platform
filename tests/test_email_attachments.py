@@ -64,7 +64,6 @@ class TestSESEmailBackendRaw:
         ses.verify_email_identity(EmailAddress="noreply@example.com")
 
         backend = SESEmailBackend(
-            region="us-east-1",
             default_sender="noreply@example.com",
         )
         att = Attachment("report.csv", b"col1,col2\n1,2", "text/csv")
@@ -79,7 +78,7 @@ class TestSESEmailBackendRaw:
         assert len(msg_id) > 0
 
     def test_send_raw_without_sender_raises(self) -> None:
-        backend = SESEmailBackend(region="us-east-1")
+        backend = SESEmailBackend()
         with pytest.raises(ValueError, match="No sender address"):
             backend.send_raw(
                 to=["user@test.com"],

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ml_platform.config import resolve_region
+
 if TYPE_CHECKING:
     from mypy_boto3_s3.client import S3Client
 
@@ -49,12 +51,12 @@ class S3StateManager:
         region: AWS region for the S3 client.
     """
 
-    def __init__(self, bucket: str, prefix: str, region: str = "us-east-1") -> None:
+    def __init__(self, bucket: str, prefix: str, region: str | None = None) -> None:
         import boto3
 
         self._bucket = bucket
         self._prefix = prefix.rstrip("/") + "/"
-        self._s3: S3Client = boto3.client("s3", region_name=region)
+        self._s3: S3Client = boto3.client("s3", region_name=resolve_region(region))
 
     def upload(self, local_dir: str) -> str:
         """Upload a local checkpoint directory to S3.

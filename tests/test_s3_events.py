@@ -84,7 +84,7 @@ class TestS3NotificationManager:
         s3 = boto3.client("s3", region_name="us-east-1")
         s3.create_bucket(Bucket="notify-bucket")
 
-        mgr = S3NotificationManager(bucket="notify-bucket", region="us-east-1")
+        mgr = S3NotificationManager(bucket="notify-bucket")
         mgr.add_queue_notification(
             queue_arn="arn:aws:sqs:us-east-1:123456789012:my-queue",
             prefix="uploads/",
@@ -99,7 +99,7 @@ class TestS3NotificationManager:
         s3 = boto3.client("s3", region_name="us-east-1")
         s3.create_bucket(Bucket="lambda-bucket")
 
-        mgr = S3NotificationManager(bucket="lambda-bucket", region="us-east-1")
+        mgr = S3NotificationManager(bucket="lambda-bucket")
         mgr.add_lambda_notification(
             function_arn="arn:aws:lambda:us-east-1:123456789012:function:process",
         )
@@ -111,7 +111,7 @@ class TestS3NotificationManager:
         s3 = boto3.client("s3", region_name="us-east-1")
         s3.create_bucket(Bucket="clear-bucket")
 
-        mgr = S3NotificationManager(bucket="clear-bucket", region="us-east-1")
+        mgr = S3NotificationManager(bucket="clear-bucket")
         mgr.add_queue_notification(
             queue_arn="arn:aws:sqs:us-east-1:123456789012:q",
         )

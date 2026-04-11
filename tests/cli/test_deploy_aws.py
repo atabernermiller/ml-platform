@@ -44,7 +44,6 @@ def manifest() -> ProjectManifest:
         service_name="integ-test",
         service_type="llm",
         features=FeaturesConfig(conversation_store=True),
-        region="us-east-1",
     )
 
 

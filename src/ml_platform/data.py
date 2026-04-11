@@ -12,7 +12,6 @@ Usage::
     table = DynamoDBTable(
         table_name="customers",
         partition_key="customer_id",
-        region="us-east-1",
     )
     table.put_item({"customer_id": "c-123", "name": "Alice", "email": "alice@ex.com"})
     item = table.get_item({"customer_id": "c-123"})
@@ -25,6 +24,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import Table
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table as DynamoDBTable_
@@ -62,14 +62,14 @@ class DynamoDBTable(Table):
         table_name: str,
         partition_key: str,
         sort_key: str = "",
-        region: str = "us-east-1",
+        region: str | None = None,
     ) -> None:
         import boto3
 
         self._table_name = table_name
         self._partition_key = partition_key
         self._sort_key = sort_key
-        dynamodb = boto3.resource("dynamodb", region_name=region)
+        dynamodb = boto3.resource("dynamodb", region_name=resolve_region(region))
         self._table: DynamoDBTable_ = dynamodb.Table(table_name)
 
     def put_item(self, item: dict[str, Any]) -> None:

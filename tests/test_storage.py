@@ -69,7 +69,7 @@ class TestS3FileStore:
     def _make_store(prefix: str = "") -> S3FileStore:
         s3 = boto3.client("s3", region_name="us-east-1")
         s3.create_bucket(Bucket="test-files")
-        return S3FileStore(bucket="test-files", prefix=prefix, region="us-east-1")
+        return S3FileStore(bucket="test-files", prefix=prefix)
 
     def test_put_and_get(self) -> None:
         store = self._make_store()
@@ -111,7 +111,6 @@ class TestS3FileStore:
         s3.create_bucket(Bucket="cf-bucket")
         store = S3FileStore(
             bucket="cf-bucket",
-            region="us-east-1",
             cloudfront_domain="d123.cloudfront.net",
         )
         url = store.public_url("img/photo.jpg")

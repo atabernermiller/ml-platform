@@ -21,6 +21,36 @@ import os
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+_FALLBACK_REGION = "us-east-1"
+
+
+def resolve_region(explicit: str | None = None) -> str:
+    """Resolve the AWS region from a priority chain.
+
+    Resolution order:
+
+    1. *explicit* -- caller-supplied value (always wins when truthy).
+    2. ``AWS_REGION`` environment variable (set by ECS, Lambda, and the
+       AWS SDK on managed compute).
+    3. ``AWS_DEFAULT_REGION`` environment variable (conventional ``aws
+       configure`` default).
+    4. Hard-coded fallback (``us-east-1``).
+
+    Args:
+        explicit: An explicitly provided region string.  Empty strings
+            and ``None`` are treated as "not specified".
+
+    Returns:
+        A non-empty AWS region string.
+    """
+    if explicit:
+        return explicit
+    if env := os.environ.get("AWS_REGION"):
+        return env
+    if env := os.environ.get("AWS_DEFAULT_REGION"):
+        return env
+    return _FALLBACK_REGION
+
 if TYPE_CHECKING:
     from ml_platform._interfaces import Profile
     from ml_platform.alerting import AlertRule
@@ -143,7 +173,7 @@ class ServiceConfig:
     """
 
     service_name: str
-    aws_region: str = "us-east-1"
+    aws_region: str = ""
     metrics_interval_s: int = 60
     mlflow_tracking_uri: str = ""
     mlflow_experiment_name: str = ""
@@ -172,6 +202,8 @@ class ServiceConfig:
     })
 
     def __post_init__(self) -> None:
+        if not self.aws_region:
+            object.__setattr__(self, "aws_region", resolve_region())
         if not self.mlflow_experiment_name:
             object.__setattr__(self, "mlflow_experiment_name", self.service_name)
         if not self.state_table_name:

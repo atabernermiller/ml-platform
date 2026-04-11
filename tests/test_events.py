@@ -65,14 +65,14 @@ class TestEventBridgeBus:
     def test_publish_event(self) -> None:
         client = boto3.client("events", region_name="us-east-1")
         client.create_event_bus(Name="test-bus")
-        bus = EventBridgeBus(bus_name="test-bus", region="us-east-1")
+        bus = EventBridgeBus(bus_name="test-bus")
         eid = bus.publish("orders", "OrderCreated", {"order_id": "o-1"})
         assert isinstance(eid, str)
 
     def test_publish_batch(self) -> None:
         client = boto3.client("events", region_name="us-east-1")
         client.create_event_bus(Name="batch-bus")
-        bus = EventBridgeBus(bus_name="batch-bus", region="us-east-1")
+        bus = EventBridgeBus(bus_name="batch-bus")
         entries = [
             {"source": "svc", "detail_type": "A", "detail": {"n": i}}
             for i in range(5)
@@ -81,6 +81,6 @@ class TestEventBridgeBus:
         assert len(ids) == 5
 
     def test_publish_to_default_bus(self) -> None:
-        bus = EventBridgeBus(bus_name="default", region="us-east-1")
+        bus = EventBridgeBus(bus_name="default")
         eid = bus.publish("test", "TestEvent", {"key": "val"})
         assert isinstance(eid, str)

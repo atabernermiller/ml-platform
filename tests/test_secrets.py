@@ -47,11 +47,11 @@ class TestAWSSecretResolver:
         client = boto3.client("secretsmanager", region_name="us-east-1")
         client.create_secret(Name="test/secret", SecretString="myvalue")
 
-        resolver = AWSSecretResolver(region="us-east-1", cache_ttl_s=0)
+        resolver = AWSSecretResolver(cache_ttl_s=0)
         assert resolver.get("test/secret") == "myvalue"
 
     def test_get_missing_secret_raises(self) -> None:
-        resolver = AWSSecretResolver(region="us-east-1", cache_ttl_s=0)
+        resolver = AWSSecretResolver(cache_ttl_s=0)
         with pytest.raises(KeyError, match="Secret not found"):
             resolver.get("nonexistent/secret")
 
@@ -62,7 +62,7 @@ class TestAWSSecretResolver:
             SecretString=json.dumps({"host": "db.example.com", "port": 5432}),
         )
 
-        resolver = AWSSecretResolver(region="us-east-1")
+        resolver = AWSSecretResolver()
         config = resolver.get_json("db/config")
         assert config["host"] == "db.example.com"
 
@@ -70,7 +70,7 @@ class TestAWSSecretResolver:
         client = boto3.client("secretsmanager", region_name="us-east-1")
         client.create_secret(Name="cached/secret", SecretString="value1")
 
-        resolver = AWSSecretResolver(region="us-east-1", cache_ttl_s=300)
+        resolver = AWSSecretResolver(cache_ttl_s=300)
         assert resolver.get("cached/secret") == "value1"
 
         # Second call should use cache

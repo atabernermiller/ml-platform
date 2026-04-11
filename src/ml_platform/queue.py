@@ -9,7 +9,7 @@ Usage::
     from ml_platform.queue import SQSQueueBackend, InMemoryQueueBackend
 
     # Producer
-    queue = SQSQueueBackend(queue_url="https://sqs.us-east-1.amazonaws.com/123/my-queue")
+    queue = SQSQueueBackend(queue_url="https://sqs.us-east-1.amazonaws.com/123/my-queue")  # noqa: E501
     queue.send({"action": "send_email", "to": "user@example.com"})
 
     # Consumer
@@ -29,6 +29,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from ml_platform._interfaces import QueueBackend
+from ml_platform.config import resolve_region
 
 if TYPE_CHECKING:
     from mypy_boto3_sqs.client import SQSClient
@@ -58,11 +59,11 @@ class SQSQueueBackend(QueueBackend):
         region: AWS region.
     """
 
-    def __init__(self, queue_url: str, region: str = "us-east-1") -> None:
+    def __init__(self, queue_url: str, region: str | None = None) -> None:
         import boto3
 
         self._queue_url = queue_url
-        self._sqs: SQSClient = boto3.client("sqs", region_name=region)
+        self._sqs: SQSClient = boto3.client("sqs", region_name=resolve_region(region))
 
     def send(self, message: dict[str, Any], *, delay_s: int = 0) -> str:
         response = self._sqs.send_message(

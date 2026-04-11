@@ -83,7 +83,7 @@ class MonitoringConstruct(Construct):
         exploration_collapse_threshold: float = 0.01,
         evaluation_periods: int = 3,
         period: Duration = Duration.minutes(5),
-        region: str = "us-east-1",
+        region: str | None = None,
     ) -> None:
         super().__init__(scope, construct_id)
 
