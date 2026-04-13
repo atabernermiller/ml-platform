@@ -149,6 +149,7 @@ class CognitoConstruct(Construct):
 
         resolved_auth_flows = auth_flows if auth_flows is not None else self._DEFAULT_AUTH_FLOWS
 
+        oauth_settings: cognito.OAuthSettings | None = None
         if enable_oauth and callback_urls:
             oauth_settings = cognito.OAuthSettings(
                 flows=cognito.OAuthFlows(authorization_code_grant=True),
@@ -157,16 +158,6 @@ class CognitoConstruct(Construct):
                     cognito.OAuthScope.EMAIL,
                 ],
                 callback_urls=callback_urls,
-            )
-        else:
-            oauth_settings = cognito.OAuthSettings(
-                flows=cognito.OAuthFlows(
-                    authorization_code_grant=False,
-                    implicit_code_grant=False,
-                    client_credentials=False,
-                ),
-                scopes=[],
-                callback_urls=[],
             )
 
         client = pool.add_client(
