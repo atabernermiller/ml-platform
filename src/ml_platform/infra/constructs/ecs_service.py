@@ -30,6 +30,7 @@ from aws_cdk import (
     aws_ecs as ecs,
     aws_ecs_patterns as ecs_patterns,
     aws_elasticloadbalancingv2 as elbv2,
+    aws_s3 as s3,
 )
 from constructs import Construct
 
@@ -44,6 +45,7 @@ class EcsServiceConstruct(Construct):
     * Fargate service with desired task count
     * Internet-facing ALB with a target group and health check
     * Optional HTTPS listener with HTTP-to-HTTPS redirect
+    * Optional ALB deletion protection and access logging
 
     Args:
         scope: CDK construct scope.
@@ -64,6 +66,11 @@ class EcsServiceConstruct(Construct):
         certificate_arn: Optional ACM certificate ARN for HTTPS.  When
             provided the ALB listens on 443 and redirects HTTP 80 to HTTPS.
         domain_name: Optional custom domain (informational, used in outputs).
+        enable_deletion_protection: Enable ALB deletion protection to
+            prevent accidental removal.  Defaults to ``True`` for
+            production safety.
+        access_log_bucket: S3 bucket for ALB access logs.  When provided,
+            access logging is enabled on the load balancer.
     """
 
     def __init__(
@@ -83,6 +90,8 @@ class EcsServiceConstruct(Construct):
         container_port: int = 8080,
         certificate_arn: str = "",
         domain_name: str = "",
+        enable_deletion_protection: bool = True,
+        access_log_bucket: s3.IBucket | None = None,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -136,6 +145,13 @@ class EcsServiceConstruct(Construct):
             redirect_http=use_https,
         )
         self._fargate_service = fargate_service
+
+        fargate_service.load_balancer.set_attribute(
+            "deletion_protection.enabled",
+            "true" if enable_deletion_protection else "false",
+        )
+        if access_log_bucket is not None:
+            fargate_service.load_balancer.log_access_logs(access_log_bucket)
 
         fargate_service.target_group.configure_health_check(
             path=health_check_path,

@@ -28,8 +28,10 @@ from typing import Any
 
 from aws_cdk import (
     CfnOutput,
+    Duration,
     RemovalPolicy,
     aws_iam as iam,
+    aws_lambda as _lambda,
     aws_secretsmanager as sm,
 )
 from constructs import Construct
@@ -55,6 +57,11 @@ class SecretsConstruct(Construct):
         description: Human-readable description of the secret.
         removal_policy: What happens to the secret on stack deletion.
             Defaults to ``RETAIN`` for safety.
+        rotation_days: If set, attaches an automatic rotation schedule
+            that triggers every ``rotation_days`` days.  Requires
+            ``rotation_lambda`` to be provided as well.
+        rotation_lambda: Lambda function that performs the actual secret
+            rotation.  Required when ``rotation_days`` is set.
     """
 
     def __init__(
@@ -67,8 +74,16 @@ class SecretsConstruct(Construct):
         initial_values: dict[str, str] | None = None,
         description: str = "",
         removal_policy: RemovalPolicy = RemovalPolicy.RETAIN,
+        rotation_days: int | None = None,
+        rotation_lambda: _lambda.IFunction | None = None,
     ) -> None:
         super().__init__(scope, construct_id)
+
+        if rotation_days is not None and rotation_lambda is None:
+            raise ValueError(
+                "rotation_lambda is required when rotation_days is set. "
+                "Secrets Manager needs a Lambda function to perform rotation."
+            )
 
         template: dict[str, str] = {}
         for key in secret_keys or []:
@@ -87,6 +102,14 @@ class SecretsConstruct(Construct):
             ),
             removal_policy=removal_policy,
         )
+
+        if rotation_days is not None and rotation_lambda is not None:
+            self._secret.add_rotation_schedule(
+                "RotationSchedule",
+                automatically_after=Duration.days(rotation_days),
+                rotate_immediately_on_update=True,
+                rotation_lambda=rotation_lambda,
+            )
 
         CfnOutput(
             self,

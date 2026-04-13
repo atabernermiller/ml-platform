@@ -11,6 +11,8 @@ Usage::
         self, "CDN",
         bucket=assets_bucket,
         domain_names=["assets.example.com"],
+        certificate=my_acm_certificate,
+        response_headers_policy=my_security_headers_policy,
     )
 """
 
@@ -20,6 +22,7 @@ from aws_cdk import (
     CfnOutput,
     Duration,
     RemovalPolicy,
+    aws_certificatemanager as acm,
     aws_cloudfront as cf,
     aws_cloudfront_origins as origins,
     aws_s3 as s3,
@@ -37,6 +40,11 @@ class CDNConstruct(Construct):
             bucket is created.
         service_name: Service name for resource naming.
         domain_names: Optional custom domain names for the distribution.
+        certificate: ACM certificate for TLS on custom domains.  Required
+            when ``domain_names`` is provided; CloudFront rejects custom
+            domains without a certificate.
+        response_headers_policy: CloudFront response-headers policy
+            (e.g. security headers).  Attached to the default behaviour.
         default_ttl: Default cache TTL.
         max_ttl: Maximum cache TTL.
         price_class: CloudFront price class.
@@ -50,11 +58,19 @@ class CDNConstruct(Construct):
         bucket: s3.IBucket | None = None,
         service_name: str = "",
         domain_names: list[str] | None = None,
+        certificate: acm.ICertificate | None = None,
+        response_headers_policy: cf.IResponseHeadersPolicy | None = None,
         default_ttl: Duration = Duration.hours(24),
         max_ttl: Duration = Duration.days(365),
         price_class: cf.PriceClass = cf.PriceClass.PRICE_CLASS_100,
     ) -> None:
         super().__init__(scope, construct_id)
+
+        if domain_names and not certificate:
+            raise ValueError(
+                "An ACM certificate is required when custom domain_names are "
+                "specified. CloudFront rejects custom domains without TLS."
+            )
 
         if bucket is None:
             bucket = s3.Bucket(
@@ -84,8 +100,10 @@ class CDNConstruct(Construct):
                 viewer_protocol_policy=cf.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cache_policy,
                 allowed_methods=cf.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                response_headers_policy=response_headers_policy,
             ),
             domain_names=domain_names or [],
+            certificate=certificate,
             price_class=price_class,
         )
 

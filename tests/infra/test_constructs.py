@@ -87,6 +87,76 @@ class TestCDNConstruct:
         assert cdn.domain_name is not None
         assert cdn.bucket is bucket
 
+    def test_response_headers_policy_attached(self) -> None:
+        from aws_cdk import aws_cloudfront as cf
+
+        app = App()
+        stack = Stack(app, "HeadersStack")
+        bucket = s3.Bucket(stack, "Bucket")
+        policy = cf.ResponseHeadersPolicy(
+            stack,
+            "SecurityHeaders",
+            security_headers_behavior=cf.ResponseSecurityHeadersBehavior(
+                strict_transport_security=cf.ResponseHeadersStrictTransportSecurity(
+                    access_control_max_age=Duration.seconds(63072000),
+                    include_subdomains=True,
+                    override=True,
+                ),
+            ),
+        )
+        CDNConstruct(stack, "CDN", bucket=bucket, response_headers_policy=policy)
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::CloudFront::ResponseHeadersPolicy", 1)
+        template.has_resource_properties(
+            "AWS::CloudFront::Distribution",
+            Match.object_like({
+                "DistributionConfig": Match.object_like({
+                    "DefaultCacheBehavior": Match.object_like({
+                        "ResponseHeadersPolicyId": Match.any_value(),
+                    }),
+                }),
+            }),
+        )
+
+    def test_certificate_attached_with_custom_domains(self) -> None:
+        from aws_cdk import aws_certificatemanager as acm
+
+        app = App()
+        stack = Stack(app, "CertStack")
+        bucket = s3.Bucket(stack, "Bucket")
+        cert = acm.Certificate.from_certificate_arn(
+            stack, "Cert",
+            "arn:aws:acm:us-east-1:123456789012:certificate/test-cert",
+        )
+        CDNConstruct(
+            stack, "CDN",
+            bucket=bucket,
+            domain_names=["cdn.example.com"],
+            certificate=cert,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::CloudFront::Distribution",
+            Match.object_like({
+                "DistributionConfig": Match.object_like({
+                    "ViewerCertificate": Match.object_like({
+                        "AcmCertificateArn": "arn:aws:acm:us-east-1:123456789012:certificate/test-cert",
+                    }),
+                }),
+            }),
+        )
+
+    def test_domain_names_without_certificate_raises(self) -> None:
+        app = App()
+        stack = Stack(app, "NoCertStack")
+        bucket = s3.Bucket(stack, "Bucket")
+        with pytest.raises(ValueError, match="ACM certificate is required"):
+            CDNConstruct(
+                stack, "CDN",
+                bucket=bucket,
+                domain_names=["cdn.example.com"],
+            )
+
 
 # ---------------------------------------------------------------------------
 # EcsServiceConstruct
@@ -226,6 +296,79 @@ class TestEcsServiceConstruct:
             domain_name="api.example.com",
         )
         assert svc.service_url == "https://api.example.com"
+
+    def test_deletion_protection_enabled_by_default(self) -> None:
+        stack, vpc = self._make_stack_with_vpc()
+        EcsServiceConstruct(
+            stack, "Svc",
+            vpc=vpc,
+            service_name="del-prot-svc",
+            container_image="nginx:latest",
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::ElasticLoadBalancingV2::LoadBalancer",
+            Match.object_like({
+                "LoadBalancerAttributes": Match.array_with([
+                    Match.object_like({
+                        "Key": "deletion_protection.enabled",
+                        "Value": "true",
+                    }),
+                ]),
+            }),
+        )
+
+    def test_deletion_protection_can_be_disabled(self) -> None:
+        stack, vpc = self._make_stack_with_vpc()
+        EcsServiceConstruct(
+            stack, "Svc",
+            vpc=vpc,
+            service_name="no-del-prot-svc",
+            container_image="nginx:latest",
+            enable_deletion_protection=False,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::ElasticLoadBalancingV2::LoadBalancer",
+            Match.object_like({
+                "LoadBalancerAttributes": Match.array_with([
+                    Match.object_like({
+                        "Key": "deletion_protection.enabled",
+                        "Value": "false",
+                    }),
+                ]),
+            }),
+        )
+
+    def test_access_log_bucket_wired(self) -> None:
+        from aws_cdk import Environment
+
+        app = App()
+        stack = Stack(
+            app, "LogStack",
+            env=Environment(account="123456789012", region="us-east-1"),
+        )
+        vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+        log_bucket = s3.Bucket(stack, "LogBucket")
+        EcsServiceConstruct(
+            stack, "Svc",
+            vpc=vpc,
+            service_name="log-svc",
+            container_image="nginx:latest",
+            access_log_bucket=log_bucket,
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::ElasticLoadBalancingV2::LoadBalancer",
+            Match.object_like({
+                "LoadBalancerAttributes": Match.array_with([
+                    Match.object_like({
+                        "Key": "access_logs.s3.enabled",
+                        "Value": "true",
+                    }),
+                ]),
+            }),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -666,6 +809,57 @@ class TestSecretsConstruct:
             }),
         )
 
+    def test_rotation_schedule_created(self) -> None:
+        from aws_cdk import aws_lambda as _lambda
+
+        app = App()
+        stack = Stack(app, "RotStack")
+        rotation_fn = _lambda.Function(
+            stack, "RotFn",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="index.handler",
+            code=_lambda.Code.from_inline("def handler(e,c): pass"),
+        )
+        SecretsConstruct(
+            stack, "Secrets",
+            service_name="rot-svc",
+            secret_keys=["KEY"],
+            rotation_days=30,
+            rotation_lambda=rotation_fn,
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::SecretsManager::RotationSchedule", 1)
+        template.has_resource_properties(
+            "AWS::SecretsManager::RotationSchedule",
+            Match.object_like({
+                "RotationRules": Match.object_like({
+                    "ScheduleExpression": "rate(30 days)",
+                }),
+            }),
+        )
+
+    def test_rotation_without_lambda_raises(self) -> None:
+        app = App()
+        stack = Stack(app, "BadRotStack")
+        with pytest.raises(ValueError, match="rotation_lambda is required"):
+            SecretsConstruct(
+                stack, "Secrets",
+                service_name="bad-rot-svc",
+                secret_keys=["KEY"],
+                rotation_days=30,
+            )
+
+    def test_no_rotation_by_default(self) -> None:
+        app = App()
+        stack = Stack(app, "NoRotStack")
+        SecretsConstruct(
+            stack, "Secrets",
+            service_name="no-rot-svc",
+            secret_keys=["KEY"],
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::SecretsManager::RotationSchedule", 0)
+
 
 # ---------------------------------------------------------------------------
 # MultiRegionConstruct
@@ -944,3 +1138,58 @@ class TestCognitoConstruct:
         import json as _json
         tpl_str = _json.dumps(tpl_json)
         assert "ALLOW_ADMIN_USER_PASSWORD_AUTH" not in tpl_str
+
+    def test_no_oauth_flows_by_default(self) -> None:
+        """Default config must not produce AllowedOAuthFlows, scopes, or
+        placeholder callback URLs in the UserPoolClient resource."""
+        app = App()
+        stack = Stack(app, "NoOAuthStack")
+        CognitoConstruct(stack, "Auth", service_name="no-oauth")
+        template = Template.from_stack(stack)
+        import json as _json
+
+        resources = template.to_json().get("Resources", {})
+        for _lid, resource in resources.items():
+            if resource.get("Type") != "AWS::Cognito::UserPoolClient":
+                continue
+            props = resource.get("Properties", {})
+            oauth_flows = props.get("AllowedOAuthFlows", [])
+            oauth_scopes = props.get("AllowedOAuthScopes", [])
+            callback_urls = props.get("CallbackURLs", [])
+            assert "implicit" not in oauth_flows, "implicit OAuth flow should not be enabled"
+            assert "aws.cognito.signin.user.admin" not in oauth_scopes
+            assert "https://example.com" not in callback_urls
+
+    def test_oauth_with_callback_urls(self) -> None:
+        app = App()
+        stack = Stack(app, "OAuthStack")
+        CognitoConstruct(
+            stack, "Auth",
+            service_name="oauth-svc",
+            enable_oauth=True,
+            callback_urls=["https://app.example.com/callback"],
+        )
+        template = Template.from_stack(stack)
+        template.has_resource_properties(
+            "AWS::Cognito::UserPoolClient",
+            Match.object_like({
+                "AllowedOAuthFlows": ["code"],
+                "AllowedOAuthScopes": Match.array_with(["openid", "email"]),
+                "CallbackURLs": ["https://app.example.com/callback"],
+            }),
+        )
+        tpl_json = template.to_json()
+        import json as _json
+        tpl_str = _json.dumps(tpl_json)
+        assert "implicit" not in tpl_str
+        assert "aws.cognito.signin.user.admin" not in tpl_str
+
+    def test_oauth_without_callback_urls_raises(self) -> None:
+        app = App()
+        stack = Stack(app, "BadOAuthStack")
+        with pytest.raises(ValueError, match="callback_urls is required"):
+            CognitoConstruct(
+                stack, "Auth",
+                service_name="bad-oauth",
+                enable_oauth=True,
+            )

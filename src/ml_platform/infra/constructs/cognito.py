@@ -5,6 +5,10 @@ suitable for admin/back-office authentication: self-signup disabled,
 strong password policy, and an app client configured for the
 ``USER_PASSWORD_AUTH`` and ``ADMIN_USER_PASSWORD_AUTH`` flows.
 
+OAuth redirect flows (implicit, authorization_code) are **disabled** by
+default.  Enable them explicitly via ``enable_oauth`` and provide validated
+``callback_urls`` — the construct refuses to use placeholders.
+
 Usage::
 
     from ml_platform.infra.constructs import CognitoConstruct
@@ -44,6 +48,9 @@ class CognitoConstruct(Construct):
     * An app client authorised for ``USER_PASSWORD_AUTH`` and
       ``ADMIN_USER_PASSWORD_AUTH`` flows by default (matching the
       ``AdminInitiateAuthCommand`` pattern used by Next.js backends).
+    * **No OAuth redirect flows** by default — no implicit grant, no
+      ``aws.cognito.signin.user.admin`` scope, and no placeholder
+      callback URLs.
     * Optional custom domain prefix for the hosted UI.
 
     Args:
@@ -59,6 +66,11 @@ class CognitoConstruct(Construct):
         auth_flows: Override the default Cognito auth-flow configuration.
             When ``None``, the construct enables ``USER_PASSWORD_AUTH``
             and ``ADMIN_USER_PASSWORD_AUTH``.
+        enable_oauth: When ``True``, configure the authorization-code
+            grant with minimal scopes (``openid``, ``email``).
+            Requires ``callback_urls``.
+        callback_urls: Callback URLs for the OAuth authorization-code
+            flow.  Required when ``enable_oauth`` is ``True``.
     """
 
     @dataclass(frozen=True)
@@ -71,7 +83,8 @@ class CognitoConstruct(Construct):
             require_uppercase: Require at least one uppercase character.
             require_digits: Require at least one digit.
             require_symbols: Require at least one symbol.
-            temp_valid_days: Validity period for temporary passwords.
+            temp_password_validity_days: Validity period for temporary
+                passwords.
         """
 
         min_length: int = 12
@@ -98,8 +111,16 @@ class CognitoConstruct(Construct):
         removal_policy: RemovalPolicy = RemovalPolicy.RETAIN,
         domain_prefix: str = "",
         auth_flows: cognito.AuthFlow | None = None,
+        enable_oauth: bool = False,
+        callback_urls: list[str] | None = None,
     ) -> None:
         super().__init__(scope, construct_id)
+
+        if enable_oauth and not callback_urls:
+            raise ValueError(
+                "callback_urls is required when enable_oauth is True. "
+                "Do not use placeholder URLs like https://example.com."
+            )
 
         pw = password_policy or self.PasswordPolicy()
 
@@ -128,6 +149,26 @@ class CognitoConstruct(Construct):
 
         resolved_auth_flows = auth_flows if auth_flows is not None else self._DEFAULT_AUTH_FLOWS
 
+        if enable_oauth and callback_urls:
+            oauth_settings = cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(authorization_code_grant=True),
+                scopes=[
+                    cognito.OAuthScope.OPENID,
+                    cognito.OAuthScope.EMAIL,
+                ],
+                callback_urls=callback_urls,
+            )
+        else:
+            oauth_settings = cognito.OAuthSettings(
+                flows=cognito.OAuthFlows(
+                    authorization_code_grant=False,
+                    implicit_code_grant=False,
+                    client_credentials=False,
+                ),
+                scopes=[],
+                callback_urls=[],
+            )
+
         client = pool.add_client(
             "AppClient",
             user_pool_client_name=f"{service_name}-client" if service_name else None,
@@ -136,6 +177,7 @@ class CognitoConstruct(Construct):
             access_token_validity=Duration.hours(1),
             id_token_validity=Duration.hours(1),
             refresh_token_validity=Duration.days(30),
+            o_auth=oauth_settings,
         )
         self._app_client = client
 
