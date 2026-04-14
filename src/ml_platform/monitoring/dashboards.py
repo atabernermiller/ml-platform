@@ -29,7 +29,34 @@ from ml_platform.config import ServiceConfig
 
 _NAMESPACE = "MLPlatform"
 
-PanelSet = Literal["core", "llm", "agent", "stateful"]
+PanelSet = Literal["core", "llm", "agent", "stateful", "web"]
+
+
+class WebResources:
+    """Identifiers for AWS resources used in web dashboard panels.
+
+    Pass this to :func:`generate_dashboard` so panels can reference the
+    correct ALB, ECS cluster/service, and RDS instance dimensions.
+
+    Attributes:
+        alb_full_name: ALB full name (e.g. ``app/my-alb/50dc6c495c0c9188``).
+        ecs_cluster_name: ECS cluster name.
+        ecs_service_name: ECS service name.
+        rds_instance_id: RDS DB instance identifier.
+    """
+
+    def __init__(
+        self,
+        *,
+        alb_full_name: str = "",
+        ecs_cluster_name: str = "",
+        ecs_service_name: str = "",
+        rds_instance_id: str = "",
+    ) -> None:
+        self.alb_full_name = alb_full_name
+        self.ecs_cluster_name = ecs_cluster_name
+        self.ecs_service_name = ecs_service_name
+        self.rds_instance_id = rds_instance_id
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +70,7 @@ def generate_dashboard(
     panel_sets: list[PanelSet] | None = None,
     region: str = "",
     namespace: str = _NAMESPACE,
+    resources: WebResources | None = None,
 ) -> dict[str, Any]:
     """Generate a Grafana dashboard JSON model with composable panel sets.
 
@@ -58,6 +86,8 @@ def generate_dashboard(
         panel_sets: Explicit list of panel sets to include.
         region: AWS region for CloudWatch targets.
         namespace: CloudWatch metrics namespace.
+        resources: Optional :class:`WebResources` providing AWS resource
+            identifiers for the ``"web"`` panel set.
 
     Returns:
         Grafana dashboard JSON model.
@@ -71,9 +101,10 @@ def generate_dashboard(
     panels: list[dict[str, Any]] = []
     y_offset = 0
 
-    core = _core_panels(service_name, region, namespace, y_offset)
-    panels.extend(core)
-    y_offset += _height_of(core)
+    if "web" not in panel_sets:
+        core = _core_panels(service_name, region, namespace, y_offset)
+        panels.extend(core)
+        y_offset += _height_of(core)
 
     if "llm" in panel_sets or "agent" in panel_sets:
         llm = _llm_panels(service_name, region, namespace, y_offset)
@@ -89,6 +120,11 @@ def generate_dashboard(
         sf = _stateful_panels(service_name, region, namespace, y_offset)
         panels.extend(sf)
         y_offset += _height_of(sf)
+
+    if "web" in panel_sets:
+        web = _web_panels(service_name, region, y_offset, resources)
+        panels.extend(web)
+        y_offset += _height_of(web)
 
     return {
         "dashboard": {
@@ -212,6 +248,103 @@ def _stateful_panels(
         _panel("Prediction Error", "timeseries",
                [t("prediction_error")], x=12, y=y0 + 16, w=12),
     ]
+
+
+def _web_panels(
+    svc: str, region: str, y0: int,
+    resources: WebResources | None = None,
+) -> list[dict[str, Any]]:
+    """Dashboard panels for web services (ALB, ECS, RDS metrics)."""
+    res = resources or WebResources()
+    panels: list[dict[str, Any]] = []
+
+    # -- ALB panels --
+    if res.alb_full_name:
+        def alb_target(metric: str, stat: str = "Sum") -> dict[str, Any]:
+            return {
+                "type": "cloudwatch",
+                "namespace": "AWS/ApplicationELB",
+                "metricName": metric,
+                "dimensions": {"LoadBalancer": [res.alb_full_name]},
+                "statistics": [stat],
+                "period": "60",
+                "region": region,
+            }
+
+        panels.extend([
+            _panel("ALB Request Count", "timeseries",
+                   [alb_target("RequestCount")],
+                   x=0, y=y0, w=12),
+            _panel("ALB 5xx / 4xx Errors", "timeseries",
+                   [alb_target("HTTPCode_ELB_5XX_Count"),
+                    alb_target("HTTPCode_ELB_4XX_Count")],
+                   x=12, y=y0, w=12),
+            _panel("ALB Target Response Time", "timeseries",
+                   [alb_target("TargetResponseTime", "p50"),
+                    alb_target("TargetResponseTime", "p95"),
+                    alb_target("TargetResponseTime", "p99")],
+                   x=0, y=y0 + 8, w=24),
+        ])
+        y0 += 16
+
+    # -- ECS panels --
+    if res.ecs_cluster_name and res.ecs_service_name:
+        def ecs_target(metric: str, stat: str = "Average") -> dict[str, Any]:
+            return {
+                "type": "cloudwatch",
+                "namespace": "AWS/ECS",
+                "metricName": metric,
+                "dimensions": {
+                    "ClusterName": [res.ecs_cluster_name],
+                    "ServiceName": [res.ecs_service_name],
+                },
+                "statistics": [stat],
+                "period": "60",
+                "region": region,
+            }
+
+        panels.extend([
+            _panel("ECS CPU Utilisation", "timeseries",
+                   [ecs_target("CPUUtilization")],
+                   x=0, y=y0, w=12),
+            _panel("ECS Memory Utilisation", "timeseries",
+                   [ecs_target("MemoryUtilization")],
+                   x=12, y=y0, w=12),
+            _panel("ECS Running Tasks", "timeseries",
+                   [ecs_target("RunningTaskCount", "Minimum")],
+                   x=0, y=y0 + 8, w=12),
+            _panel("ECS Desired Tasks", "timeseries",
+                   [ecs_target("DesiredTaskCount", "Maximum")],
+                   x=12, y=y0 + 8, w=12),
+        ])
+        y0 += 16
+
+    # -- RDS panels --
+    if res.rds_instance_id:
+        def rds_target(metric: str, stat: str = "Average") -> dict[str, Any]:
+            return {
+                "type": "cloudwatch",
+                "namespace": "AWS/RDS",
+                "metricName": metric,
+                "dimensions": {"DBInstanceIdentifier": [res.rds_instance_id]},
+                "statistics": [stat],
+                "period": "60",
+                "region": region,
+            }
+
+        panels.extend([
+            _panel("RDS CPU Utilisation", "timeseries",
+                   [rds_target("CPUUtilization")],
+                   x=0, y=y0, w=8),
+            _panel("RDS Active Connections", "timeseries",
+                   [rds_target("DatabaseConnections", "Maximum")],
+                   x=8, y=y0, w=8),
+            _panel("RDS Free Storage (bytes)", "timeseries",
+                   [rds_target("FreeStorageSpace", "Minimum")],
+                   x=16, y=y0, w=8),
+        ])
+
+    return panels
 
 
 # ---------------------------------------------------------------------------

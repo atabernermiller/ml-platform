@@ -957,6 +957,183 @@ class TestSageMakerEndpointConstruct:
 
 
 # ---------------------------------------------------------------------------
+# MonitoringConstruct
+# ---------------------------------------------------------------------------
+
+
+class TestMonitoringConstruct:
+    def test_ml_alarms_created_by_default(self) -> None:
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "MLMonStack")
+        mon = MonitoringConstruct(
+            stack, "Mon",
+            service_name="ml-svc",
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::CloudWatch::Alarm", 4)
+        template.resource_count_is("AWS::SNS::Topic", 1)
+        assert len(mon.alarms) == 4
+
+    def test_ml_alarms_skipped_when_disabled(self) -> None:
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "NoMLStack")
+        mon = MonitoringConstruct(
+            stack, "Mon",
+            service_name="web-only",
+            include_ml_alarms=False,
+            create_dashboard=False,
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::CloudWatch::Alarm", 0)
+        template.resource_count_is("AWS::SNS::Topic", 1)
+        assert len(mon.alarms) == 0
+
+    def test_alb_alarms_created(self) -> None:
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "ALBMonStack")
+        vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+        svc = EcsServiceConstruct(
+            stack, "Svc",
+            vpc=vpc,
+            service_name="alb-mon-svc",
+            container_image="nginx:latest",
+        )
+        mon = MonitoringConstruct(
+            stack, "Mon",
+            service_name="alb-svc",
+            alb=svc.service.load_balancer,
+            include_ml_alarms=False,
+            create_dashboard=False,
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::CloudWatch::Alarm", 3)
+        assert len(mon.alarms) == 3
+
+    def test_rds_alarms_created(self) -> None:
+        from aws_cdk import aws_rds as rds, RemovalPolicy
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "RDSMonStack")
+        vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+        database = rds.DatabaseInstance(
+            stack, "DB",
+            engine=rds.DatabaseInstanceEngine.postgres(
+                version=rds.PostgresEngineVersion.VER_17,
+            ),
+            vpc=vpc,
+            instance_type=ec2.InstanceType.of(
+                ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO,
+            ),
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        mon = MonitoringConstruct(
+            stack, "Mon",
+            service_name="rds-svc",
+            rds_instance=database,
+            include_ml_alarms=False,
+            create_dashboard=False,
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::CloudWatch::Alarm", 3)
+        assert len(mon.alarms) == 3
+
+    def test_full_web_stack_alarm_count(self) -> None:
+        from aws_cdk import aws_rds as rds, RemovalPolicy
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "FullWebStack")
+        vpc = ec2.Vpc(stack, "Vpc", max_azs=2)
+        svc = EcsServiceConstruct(
+            stack, "Svc",
+            vpc=vpc,
+            service_name="full-web",
+            container_image="nginx:latest",
+        )
+        database = rds.DatabaseInstance(
+            stack, "DB",
+            engine=rds.DatabaseInstanceEngine.postgres(
+                version=rds.PostgresEngineVersion.VER_17,
+            ),
+            vpc=vpc,
+            instance_type=ec2.InstanceType.of(
+                ec2.InstanceClass.T4G, ec2.InstanceSize.MICRO,
+            ),
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        mon = MonitoringConstruct(
+            stack, "Mon",
+            service_name="full-web",
+            alarm_email="ops@example.com",
+            alb=svc.service.load_balancer,
+            ecs_service=svc.service.service,
+            rds_instance=database,
+            include_ml_alarms=False,
+            create_dashboard=False,
+        )
+        # 3 ALB + 1 ECS + 3 RDS = 7
+        assert len(mon.alarms) == 7
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::CloudWatch::Alarm", 7)
+        template.resource_count_is("AWS::SNS::Subscription", 1)
+
+    def test_email_subscription_added(self) -> None:
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "EmailMonStack")
+        MonitoringConstruct(
+            stack, "Mon",
+            service_name="email-svc",
+            alarm_email="test@example.com",
+            include_ml_alarms=False,
+            create_dashboard=False,
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::SNS::Subscription", 1)
+        template.has_resource_properties(
+            "AWS::SNS::Subscription",
+            Match.object_like({
+                "Protocol": "email",
+                "Endpoint": "test@example.com",
+            }),
+        )
+
+    def test_dashboard_created_by_default(self) -> None:
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "DashStack")
+        MonitoringConstruct(
+            stack, "Mon",
+            service_name="dash-svc",
+            include_ml_alarms=False,
+        )
+        template = Template.from_stack(stack)
+        template.resource_count_is("AWS::CloudWatch::Dashboard", 1)
+
+    def test_alarm_topic_exposed(self) -> None:
+        from ml_platform.infra.constructs.monitoring import MonitoringConstruct
+
+        app = App()
+        stack = Stack(app, "TopicStack")
+        mon = MonitoringConstruct(
+            stack, "Mon",
+            service_name="topic-svc",
+            include_ml_alarms=False,
+            create_dashboard=False,
+        )
+        assert mon.alarm_topic is not None
+
+
+# ---------------------------------------------------------------------------
 # CognitoConstruct
 # ---------------------------------------------------------------------------
 
